@@ -1,0 +1,8 @@
+{
+  "name": "SIMKA Digital Signage Studio",
+  "description": "Sistem Digital Signage Sekolah dengan arsitektur Board & Slide Playlist (Foto Portrait, Video Fullscreen, Poster, Grid Foto, Informasi Jadwal Realtime, Running Text Ticker, dan Pratinjau Fullscreen 1920x1080).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
