@@ -32,6 +32,8 @@ import {
   CheckCircle2,
   Calendar
 } from 'lucide-react';
+import { slideService } from '../../services/slideService';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import { LayoutThreePhotos } from '../layouts/LayoutThreePhotos';
 import { LayoutVideoFullscreen } from '../layouts/LayoutVideoFullscreen';
 import { LayoutThreePosters } from '../layouts/LayoutThreePosters';
@@ -84,7 +86,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   const posterMedia = mediaLibrary.filter(m => m.type === 'poster');
 
   // Handle Board Switch & Updates
-  const handleBoardUpdate = (updatedBoard: BoardItem) => {
+  const handleBoardUpdate = async (updatedBoard: BoardItem) => {
     const newBoards = boards.map(b => b.id === updatedBoard.id ? updatedBoard : b);
     onUpdateBoards(newBoards);
   };
@@ -302,14 +304,37 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     handleBoardUpdate(updatedBoard);
   };
 
-  const handleSaveEditedSlide = (updatedSlide: SlideItem) => {
-    const newSlides = currentBoard.slides.map(s => s.id === updatedSlide.id ? updatedSlide : s);
-    const updatedBoard = {
-      ...currentBoard,
-      slides: newSlides
-    };
-    handleBoardUpdate(updatedBoard);
-    setEditingSlide(null);
+  const handleSaveEditedSlide = async (updatedSlide: SlideItem) => {
+    // Sync to Supabase
+    const mediaIds: string[] = [];
+    const content = updatedSlide.content;
+    const findMediaId = (url: string) => mediaLibrary.find(m => m.url === url)?.id;
+
+    if (content.photos) content.photos.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
+    if (content.videoUrl) { const id = findMediaId(content.videoUrl); if (id) mediaIds.push(id); }
+    if (content.posterUrl) { const id = findMediaId(content.posterUrl); if (id) mediaIds.push(id); }
+    if (content.posters) content.posters.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
+    if (content.gridPhotos) content.gridPhotos.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
+    if (content.splitPhotoUrl) { const id = findMediaId(content.splitPhotoUrl); if (id) mediaIds.push(id); }
+
+    try {
+      if (isSupabaseConfigured()) {
+        await slideService.saveSlide(currentBoard.id, updatedSlide, mediaIds);
+      } else {
+        console.warn('Supabase not configured. Saving locally only.');
+      }
+      
+      const newSlides = currentBoard.slides.map(s => s.id === updatedSlide.id ? updatedSlide : s);
+      const updatedBoard = {
+        ...currentBoard,
+        slides: newSlides
+      };
+      handleBoardUpdate(updatedBoard);
+      setEditingSlide(null);
+    } catch (err) {
+      console.error('Error saving to Supabase:', err);
+      alert('Gagal menyimpan ke database.');
+    }
   };
 
   // Helper to render miniature thumbnail representation

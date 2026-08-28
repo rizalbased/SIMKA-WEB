@@ -15,6 +15,8 @@ import {
   Radio
 } from 'lucide-react';
 
+import { jadwalService } from '../../services/jadwalService';
+
 interface AdminJadwalLesProps {
   lessonPeriods: LessonPeriod[];
   onUpdateLessonPeriods: (periods: LessonPeriod[]) => void;
@@ -57,13 +59,19 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
     }
   }
 
-  const handleSavePeriod = (period: LessonPeriod) => {
-    const updated = lessonPeriods.map(p => p.id === period.id ? period : p);
-    onUpdateLessonPeriods(updated);
-    setEditingPeriod(null);
+  const handleSavePeriod = async (period: LessonPeriod) => {
+    try {
+      await jadwalService.updateJadwal(period);
+      const updated = lessonPeriods.map(p => p.id === period.id ? period : p);
+      onUpdateLessonPeriods(updated);
+      setEditingPeriod(null);
+    } catch (err) {
+      console.error('Error saving period:', err);
+      alert('Gagal menyimpan ke database.');
+    }
   };
 
-  const handleAddPeriod = (newP: Partial<LessonPeriod>) => {
+  const handleAddPeriod = async (newP: Partial<LessonPeriod>) => {
     const period: LessonPeriod = {
       id: `les-${Date.now()}`,
       periodNumber: lessonPeriods.length + 1,
@@ -74,15 +82,27 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
       room: newP.room || 'R. Teori',
       isBreak: Boolean(newP.isBreak)
     };
-    onUpdateLessonPeriods([...lessonPeriods, period]);
-    setIsAddModalOpen(false);
+    try {
+      await jadwalService.addJadwal(period);
+      onUpdateLessonPeriods([...lessonPeriods, period]);
+      setIsAddModalOpen(false);
+    } catch (err) {
+      console.error('Error adding period:', err);
+      alert('Gagal menyimpan ke database.');
+    }
   };
 
-  const handleDeletePeriod = (id: string) => {
-    onUpdateLessonPeriods(lessonPeriods.filter(p => p.id !== id));
+  const handleDeletePeriod = async (id: string) => {
+    try {
+      await jadwalService.deleteJadwal(id);
+      onUpdateLessonPeriods(lessonPeriods.filter(p => p.id !== id));
+    } catch (err) {
+      console.error('Error deleting period:', err);
+      alert('Gagal menghapus dari database.');
+    }
   };
 
-  const handleResetDefault = () => {
+  const handleResetDefault = async () => {
     const defaultPeriods: LessonPeriod[] = [
       { id: 'les-1', periodNumber: 1, startTime: '07:00', endTime: '07:45', subject: 'Upacara / Pembiasaan Pagi', teacher: 'Tim Kesiswaan', room: 'Lapangan Utama', isBreak: false },
       { id: 'les-2', periodNumber: 2, startTime: '07:45', endTime: '08:30', subject: 'Matematika Terapan', teacher: 'Dra. Siti Aminah', room: 'R. 201', isBreak: false },
@@ -94,7 +114,13 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
       { id: 'les-8', periodNumber: 8, startTime: '12:00', endTime: '13:00', subject: 'Istirahat Siang & Sholat Dzuhur', teacher: 'Tim Rohis', room: 'Masjid Sekolah', isBreak: true },
       { id: 'les-9', periodNumber: 9, startTime: '13:00', endTime: '14:30', subject: 'Ekstrakurikuler & Minat Bakat', teacher: 'Pelatih Pembina', room: 'Studio Seni / GOR', isBreak: false }
     ];
-    onUpdateLessonPeriods(defaultPeriods);
+    try {
+      await jadwalService.setJadwal(defaultPeriods);
+      onUpdateLessonPeriods(defaultPeriods);
+    } catch (err) {
+      console.error('Error resetting periods:', err);
+      alert('Gagal me-reset database.');
+    }
   };
 
   return (

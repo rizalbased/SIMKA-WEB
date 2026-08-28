@@ -13,6 +13,7 @@ import {
   Eye,
   CheckCircle2
 } from 'lucide-react';
+import { runningTextService } from '../../services/runningTextService';
 import { SignageRunningText } from '../display/SignageRunningText';
 
 interface AdminRunningTextProps {
@@ -116,18 +117,28 @@ export const AdminRunningText: React.FC<AdminRunningTextProps> = ({
     }
   };
 
-  const handleSave = () => {
-    onUpdateConfig({
-      runningTextContent: tickerText,
-      runningTextCategory: badgeText,
-      runningTextSpeed: speedSec,
-      runningTextBgColor: bgColor,
-      runningTextTextColor: textColor,
-      runningTextBadgeBg: badgeBg,
-      runningTextBadgeTextColor: badgeTextColor
-    });
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+  const handleSave = async () => {
+    try {
+      // 1. Sync to Supabase
+      await runningTextService.updateRunningText([
+        { content: tickerText, is_active: true }
+      ]);
+
+      onUpdateConfig({
+        runningTextContent: tickerText,
+        runningTextCategory: badgeText,
+        runningTextSpeed: speedSec,
+        runningTextBgColor: bgColor,
+        runningTextTextColor: textColor,
+        runningTextBadgeBg: badgeBg,
+        runningTextBadgeTextColor: badgeTextColor
+      });
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (err) {
+      console.error('Error saving running text:', err);
+      alert('Gagal menyimpan ke database.');
+    }
   };
 
   return (

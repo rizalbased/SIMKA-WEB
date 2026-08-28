@@ -106,6 +106,7 @@ export interface MediaItem {
   size?: string;
   orientation?: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE';
   dateAdded?: string;
+  filePath?: string; // Path in Supabase Storage
 }
 
 export interface TickerItem {

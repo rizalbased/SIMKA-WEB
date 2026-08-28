@@ -1,7 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { MediaItem, BoardItem } from '../../types';
 import { UploadCloud, Image as ImageIcon, Film, X, Trash2, AlertCircle } from 'lucide-react';
-import { mediaDb } from '../../lib/mediaDb';
+import { mediaService } from '../../services/mediaService';
+import { videoService } from '../../services/videoService';
+import { isSupabaseConfigured } from '../../lib/supabase';
 
 interface MediaPickerProps {
   label: string;
@@ -43,7 +45,11 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     if (file) handleUpload(file);
   };
 
-  const handleUpload = (file: File) => {
+  const handleUpload = async (file: File) => {
+    if (!isSupabaseConfigured()) {
+      alert('Supabase belum dikonfigurasi. Silakan masukkan URL dan API Key di menu Settings terlebih dahulu.');
+      return;
+    }
     setErrorMsg('');
     
     // Validasi ukuran
@@ -65,90 +71,89 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
       return;
     }
 
-    // Simulasi Progress Upload
+    // Progress Upload
     setIsUploading(true);
-    setUploadProgress(0);
+    setUploadProgress(10);
     
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          finishUpload(file);
-          return 100;
-        }
-        return prev + 25;
-      });
-    }, 200);
-  };
-
-  const finishUpload = async (file: File) => {
-    const url = URL.createObjectURL(file);
-    const sizeInMB = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-
-    const saveToDb = async (width: number, height: number, orientation: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE') => {
-      const mediaId = `media-${Date.now()}`;
-      
-      try {
-        await mediaDb.saveMedia({
-          id: mediaId,
-          title: file.name,
-          type: type === 'poster' ? 'poster' : (type === 'video' ? 'video' : 'foto'),
-          blob: file,
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size,
-          width,
-          height,
-          orientation,
-          createdAt: new Date().toISOString()
+    try {
+      if (file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        
+        const dimensions = await new Promise<{width: number, height: number, orientation: string}>((resolve) => {
+          img.onload = () => {
+            const width = img.naturalWidth;
+            const height = img.naturalHeight;
+            let orientation: string = 'SQUARE';
+            if (width > height) orientation = 'LANDSCAPE';
+            if (height > width) orientation = 'PORTRAIT';
+            resolve({ width, height, orientation });
+          };
+          img.src = url;
         });
 
-        const newItem: MediaItem = {
-          id: mediaId,
-          title: file.name,
-          type: type === 'poster' ? 'poster' : (type === 'video' ? 'video' : 'foto'),
-          url: url,
-          thumbnailUrl: url,
-          dimensions: `${width} × ${height} px`,
-          size: sizeInMB,
-          orientation: orientation,
-          dateAdded: new Date().toISOString().split('T')[0]
+        setUploadProgress(40);
+        const newItem = await mediaService.uploadMedia(file, {
+          width: dimensions.width,
+          height: dimensions.height,
+          orientation: dimensions.orientation,
+          type: type === 'poster' ? 'poster' : 'foto'
+        });
+        
+        setUploadProgress(100);
+        if (newItem) {
+          onUpdateMediaLibrary(prev => [newItem, ...prev]);
+          onChange(newItem.url);
+        }
+        URL.revokeObjectURL(url);
+      } else if (file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        const video = document.createElement('video');
+        
+        const dimensions = await new Promise<{width: number, height: number, orientation: string, duration: number}>((resolve) => {
+          video.onloadedmetadata = () => {
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            let orientation: string = 'SQUARE';
+            if (width > height) orientation = 'LANDSCAPE';
+            if (height > width) orientation = 'PORTRAIT';
+            resolve({ width, height, orientation, duration: video.duration });
+          };
+          video.src = url;
+        });
+
+        setUploadProgress(40);
+        const newItem = await videoService.uploadVideo(file, {
+          width: dimensions.width,
+          height: dimensions.height,
+          duration: dimensions.duration
+        });
+
+        setUploadProgress(100);
+        const mediaFormatted: MediaItem = {
+          id: newItem.id,
+          title: newItem.title,
+          type: 'video',
+          url: newItem.url,
+          dimensions: `${newItem.width} × ${newItem.height} px`,
+          size: (newItem.file_size / (1024 * 1024)).toFixed(1) + ' MB',
+          orientation: (newItem.width > newItem.height ? 'LANDSCAPE' : 'PORTRAIT') as any,
+          dateAdded: newItem.created_at.split('T')[0],
+          filePath: newItem.file_path
         };
 
-        onUpdateMediaLibrary([newItem, ...mediaLibrary]);
-        onChange(url);
-      } catch (err) {
-        console.error('Failed to save to IndexedDB:', err);
-        setErrorMsg('Gagal menyimpan ke penyimpanan lokal.');
-      } finally {
-        setIsUploading(false);
+        onUpdateMediaLibrary(prev => [mediaFormatted, ...prev]);
+        onChange(mediaFormatted.url);
+        URL.revokeObjectURL(url);
       }
-    };
-
-    if (file.type.startsWith('image/')) {
-      const img = new Image();
-      img.onload = () => {
-        const width = img.naturalWidth;
-        const height = img.naturalHeight;
-        let orientation: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE' = 'SQUARE';
-        if (width > height) orientation = 'LANDSCAPE';
-        if (height > width) orientation = 'PORTRAIT';
-
-        saveToDb(width, height, orientation);
-      };
-      img.src = url;
-    } else if (file.type.startsWith('video/')) {
-      const video = document.createElement('video');
-      video.onloadedmetadata = () => {
-        const width = video.videoWidth;
-        const height = video.videoHeight;
-        let orientation: 'PORTRAIT' | 'LANDSCAPE' | 'SQUARE' = 'SQUARE';
-        if (width > height) orientation = 'LANDSCAPE';
-        if (height > width) orientation = 'PORTRAIT';
-
-        saveToDb(width, height, orientation);
-      };
-      video.src = url;
+    } catch (err) {
+      console.error('Upload failed:', err);
+      setErrorMsg('Gagal mengunggah file ke Supabase.');
+    } finally {
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+      }, 500);
     }
   };
 
@@ -179,7 +184,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     if (isDeleting) return;
 
     if (isMediaInUse(media.id, media.url)) {
-      alert(`Foto "${media.title}" sedang digunakan pada slide. Hapus slide atau ganti medianya terlebih dahulu.`);
+      alert(`Media "${media.title}" sedang digunakan pada slide. Ganti medianya terlebih dahulu.`);
       return;
     }
 
@@ -187,34 +192,21 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
 
     setIsDeleting(media.id);
     try {
-      console.log('DELETING MEDIA:', media.id);
-      
-      // Remove from IndexedDB if it's a persistent item
-      if (media.id.startsWith('media-')) {
-        await mediaDb.init(); // Ensure initialized
-        await mediaDb.deleteMedia(media.id);
-        console.log('STORAGE DELETE SUCCESS');
+      if (media.filePath) {
+        await mediaService.deleteMedia(media.id, media.filePath);
+      } else {
+        // Fallback for non-Supabase items (legacy)
+        onUpdateMediaLibrary(prev => prev.filter(m => m.id !== media.id));
       }
 
-      // Update State using functional update to ensure fresh state
-      onUpdateMediaLibrary(prev => {
-        const newList = prev.filter(m => m.id !== media.id);
-        console.log('STATE UPDATED, NEW COUNT:', newList.length);
-        return newList;
-      });
+      onUpdateMediaLibrary(prev => prev.filter(m => m.id !== media.id));
 
-      // Cleanup blob URL
-      if (media.url.startsWith('blob:')) {
-        URL.revokeObjectURL(media.url);
-      }
-
-      // Clear selection if this was the selected item
       if (value === media.url) {
         onChange('');
       }
     } catch (err) {
       console.error('Failed to delete media:', err);
-      alert('Gagal menghapus media. Silakan coba lagi.');
+      alert('Gagal menghapus media dari Supabase.');
     } finally {
       setIsDeleting(null);
     }

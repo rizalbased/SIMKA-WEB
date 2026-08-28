@@ -15,7 +15,12 @@ import {
   INITIAL_SCREENS, 
   INITIAL_CONFIG 
 } from './data/initialData';
-import { mediaDb } from './lib/mediaDb';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { mediaService } from './services/mediaService';
+import { videoService } from './services/videoService';
+import { slideService } from './services/slideService';
+import { runningTextService } from './services/runningTextService';
+import { jadwalService } from './services/jadwalService';
 import { FullscreenDisplay } from './components/display/FullscreenDisplay';
 import { AdminHeader } from './components/admin/AdminHeader';
 import { AdminSidebar } from './components/admin/AdminSidebar';
@@ -47,97 +52,89 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_MEDIA_LIBRARY;
   });
 
-  // Persistent Media Loading & URL Re-mapping
+  // Load initial data from Supabase
   useEffect(() => {
-    const loadPersistentMedia = async () => {
+    if (!isSupabaseConfigured()) {
+      console.info('Supabase not configured. Using local data.');
+      return;
+    }
+
+    const initData = async () => {
       try {
-        const storedMedia = await mediaDb.getAllMedia();
-        if (storedMedia.length === 0) return;
+        // Fetch all data in parallel
+        const [dbMedia, dbBoards, dbRunningText, dbJadwal] = await Promise.all([
+          mediaService.getAllMedia(),
+          slideService.getBoards(),
+          runningTextService.getRunningText(),
+          jadwalService.getJadwal()
+        ]);
 
-        // 1. Create new object URLs and map IDs to them
-        const idToNewUrl: Record<string, string> = {};
-        const persistentItems: MediaItem[] = storedMedia.map(item => {
-          const newUrl = URL.createObjectURL(item.blob);
-          idToNewUrl[item.id] = newUrl;
-          return {
-            id: item.id,
-            title: item.title,
-            type: item.type,
-            url: newUrl,
-            category: item.type === 'foto' ? 'Dokumentasi' : item.type === 'video' ? 'Kegiatan' : 'Pengumuman',
-            dimensions: `${item.width} × ${item.height} px`,
-            size: (item.fileSize / (1024 * 1024)).toFixed(1) + ' MB',
-            orientation: item.orientation,
-            dateAdded: item.createdAt.split('T')[0]
-          };
-        });
-
-        // 2. Bridge old URLs to new URLs using the stored media library from localStorage
-        const oldMediaLibraryRaw = localStorage.getItem('simka_media');
-        if (oldMediaLibraryRaw) {
-          const oldMediaLibrary: MediaItem[] = JSON.parse(oldMediaLibraryRaw);
-          const oldUrlToNewUrl: Record<string, string> = {};
-          
-          oldMediaLibrary.forEach(oldItem => {
-            if (idToNewUrl[oldItem.id]) {
-              oldUrlToNewUrl[oldItem.url] = idToNewUrl[oldItem.id];
-            }
-          });
-
-          // 3. Update Boards content with the new URLs
-          setBoards(prevBoards => {
-            return prevBoards.map(board => ({
-              ...board,
-              slides: board.slides.map(slide => {
-                const content = { ...slide.content };
-                let changed = false;
-
-                const replaceUrl = (url: string) => {
-                  if (url && oldUrlToNewUrl[url]) {
-                    changed = true;
-                    return oldUrlToNewUrl[url];
-                  }
-                  return url;
-                };
-
-                if (content.photos) content.photos = content.photos.map(replaceUrl) as any;
-                if (content.videoUrl) content.videoUrl = replaceUrl(content.videoUrl);
-                if (content.posterUrl) content.posterUrl = replaceUrl(content.posterUrl);
-                if (content.posters) content.posters = content.posters.map(replaceUrl) as any;
-                if (content.gridPhotos) content.gridPhotos = content.gridPhotos.map(replaceUrl) as any;
-                if (content.splitPhotoUrl) content.splitPhotoUrl = replaceUrl(content.splitPhotoUrl);
-
-                return changed ? { ...slide, content } : slide;
-              })
-            }));
-          });
+        if (dbMedia.length > 0) setMediaLibrary(dbMedia);
+        if (dbBoards.length > 0) setBoards(dbBoards);
+        if (dbJadwal.length > 0) setLessonPeriods(dbJadwal);
+        if (dbRunningText.length > 0) {
+          // Sync config running text with first active running text
+          const activeText = dbRunningText.find(t => t.is_active);
+          if (activeText) {
+            handleUpdateConfig({ runningTextContent: activeText.content });
+          }
         }
-
-        // 4. Update Media Library state with the newly created URLs
-        setMediaLibrary(prev => {
-          const others = prev.filter(p => !idToNewUrl[p.id]);
-          return [...persistentItems, ...others];
-        });
-
-      } catch (error) {
-        console.error('Failed to load or migrate persistent media:', error);
+      } catch (err) {
+        console.error('Error initializing Supabase data:', err);
       }
     };
 
-    loadPersistentMedia();
+    initData();
+
+    // Set up Realtime Subscriptions
+    const mediaSub = supabase.channel('public:media')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => {
+        mediaService.getAllMedia().then(setMediaLibrary);
+      })
+      .subscribe();
+
+    const slidesSub = supabase.channel('public:slides')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'slides' }, () => {
+        slideService.getBoards().then(setBoards);
+      })
+      .subscribe();
+
+    const runningTextSub = supabase.channel('public:running_text')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'running_text' }, () => {
+        runningTextService.getRunningText().then(data => {
+          const activeText = data.find(t => t.is_active);
+          if (activeText) {
+            handleUpdateConfig({ runningTextContent: activeText.content });
+          }
+        });
+      })
+      .subscribe();
+
+    const jadwalSub = supabase.channel('public:jadwal_les')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jadwal_les' }, () => {
+        jadwalService.getJadwal().then(setLessonPeriods);
+      })
+      .subscribe();
+
+    const videosSub = supabase.channel('public:videos')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, () => {
+        videoService.getAllVideos().then(setMediaLibrary);
+      })
+      .subscribe();
+
+    return () => {
+      mediaSub.unsubscribe();
+      slidesSub.unsubscribe();
+      runningTextSub.unsubscribe();
+      jadwalSub.unsubscribe();
+      videosSub.unsubscribe();
+    };
   }, []);
 
-  const [lessonPeriods, setLessonPeriods] = useState<LessonPeriod[]>(() => {
-    const saved = localStorage.getItem('simka_lessons');
-    return saved ? JSON.parse(saved) : INITIAL_LESSON_PERIODS;
-  });
+  const [lessonPeriods, setLessonPeriods] = useState<LessonPeriod[]>(INITIAL_LESSON_PERIODS);
+  const [screens, setScreens] = useState<ScreenDevice[]>(INITIAL_SCREENS);
 
-  const [screens, setScreens] = useState<ScreenDevice[]>(() => {
-    const saved = localStorage.getItem('simka_screens');
-    return saved ? JSON.parse(saved) : INITIAL_SCREENS;
-  });
-
-  // Local storage persistence
+  // Local storage persistence (Optional fallback)
   useEffect(() => {
     localStorage.setItem('simka_config', JSON.stringify(config));
   }, [config]);
