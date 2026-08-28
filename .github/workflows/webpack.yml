@@ -1,9 +1,10 @@
-name: Deploy Vite App
+name: Deploy SIMKA Display
 
 on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -12,62 +13,127 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: github-pages
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build Vite
+    name: Build SIMKA Display
     runs-on: ubuntu-latest
 
     steps:
+      # ==========================================
+      # CHECKOUT
+      # ==========================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      # ==========================================
+      # NODE.JS 24
+      # ==========================================
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 24
 
+      # ==========================================
+      # INSTALL DEPENDENCIES
+      # ==========================================
+      #
+      # Jika package-lock.json tersedia:
+      # gunakan npm ci
+      #
+      # Jika package-lock.json belum tersedia:
+      # gunakan npm install
+      #
+      # Ini mencegah workflow gagal hanya karena
+      # lockfile belum dibuat.
+      #
       - name: Install Dependencies
-        run: npm ci
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json ditemukan."
+            echo "Menggunakan npm ci..."
+            npm ci
+          else
+            echo "package-lock.json tidak ditemukan."
+            echo "Menggunakan npm install..."
+            npm install
+          fi
 
+      # ==========================================
+      # CHECK NODE & NPM
+      # ==========================================
+      - name: Check Environment
+        run: |
+          echo "Node.js:"
+          node --version
+
+          echo "NPM:"
+          npm --version
+
+      # ==========================================
+      # BUILD VITE
+      # ==========================================
       - name: Build Vite Application
-        run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          npm run build
 
+      # ==========================================
+      # VERIFY BUILD
+      # ==========================================
       - name: Verify Build
+        shell: bash
         run: |
           if [ ! -d "dist" ]; then
             echo "ERROR: Folder dist tidak ditemukan."
             exit 1
           fi
 
-          echo "Build berhasil."
-          echo "Isi folder dist:"
-          ls -la dist
+          echo "======================================"
+          echo "BUILD BERHASIL"
+          echo "======================================"
 
+          echo "Isi folder dist:"
+          find dist -maxdepth 2 -type f | head -100
+
+      # ==========================================
+      # GITHUB PAGES
+      # ==========================================
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload GitHub Pages Artifact
+      # ==========================================
+      # UPLOAD BUILD
+      # ==========================================
+      - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
 
+  # ============================================
+  # DEPLOY
+  # ============================================
   deploy:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
+
     needs: build
+
+    permissions:
+      pages: write
+      id-token: write
 
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy
+
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
