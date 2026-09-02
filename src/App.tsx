@@ -21,6 +21,7 @@ import { videoService } from './services/videoService';
 import { slideService } from './services/slideService';
 import { runningTextService } from './services/runningTextService';
 import { jadwalService } from './services/jadwalService';
+import { settingsService } from './services/settingsService';
 import { FullscreenDisplay } from './components/display/FullscreenDisplay';
 import { AdminHeader } from './components/admin/AdminHeader';
 import { AdminSidebar } from './components/admin/AdminSidebar';
@@ -140,16 +141,24 @@ export default function App() {
     const initData = async () => {
       try {
         // Fetch all data in parallel
-        const [dbBoards, dbRunningText, dbJadwal] = await Promise.all([
+        const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme] = await Promise.all([
           slideService.getBoards(),
           runningTextService.getRunningText(),
-          jadwalService.getJadwal()
+          jadwalService.getJadwal(),
+          settingsService.getHeaderTheme()
         ]);
 
         await refreshMedia();
-        setBoards(dbBoards.length > 0 ? dbBoards : INITIAL_BOARDS);
-        if (dbJadwal.length > 0) setLessonPeriods(dbJadwal);
+        // Supabase is the single source of truth - set directly
+        setBoards(dbBoards);
+        setLessonPeriods(dbJadwal);
         
+        if (dbHeaderTheme) {
+          handleUpdateConfig({
+            headerThemeConfig: dbHeaderTheme
+          });
+        }
+
         if (dbRunningText.length > 0) {
           const activeText = dbRunningText.find(t => t.is_active);
           if (activeText) {
@@ -163,12 +172,26 @@ export default function App() {
 
     initData();
 
+    // Clean up stale localStorage boards
+    try {
+      localStorage.removeItem('simka_boards');
+    } catch {
+      // ignore
+    }
+
     // Set up Realtime Subscriptions
     const mediaChannel = supabase.channel('media-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => refreshMedia())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, () => refreshMedia())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slides' }, () => slideService.getBoards().then(setBoards))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slide_media' }, () => slideService.getBoards().then(setBoards))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_settings' }, (payload) => {
+        if (payload.new && (payload.new as any).id === 'header_theme') {
+          settingsService.getHeaderTheme().then(theme => {
+            handleUpdateConfig({ headerThemeConfig: theme });
+          });
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'running_text' }, () => {
         runningTextService.getRunningText().then(data => {
           const activeText = data.find(t => t.is_active);
@@ -197,22 +220,10 @@ export default function App() {
     };
   }, []);
 
-  // Local storage persistence (Optional fallback)
+  // Local storage persistence: only for UI client preferences
   useEffect(() => {
     localStorage.setItem('simka_config', JSON.stringify(config));
   }, [config]);
-
-  useEffect(() => {
-    localStorage.setItem('simka_boards', JSON.stringify(boards));
-  }, [boards]);
-
-  useEffect(() => {
-    localStorage.setItem('simka_media', JSON.stringify(mediaLibrary));
-  }, [mediaLibrary]);
-
-  useEffect(() => {
-    localStorage.setItem('simka_lessons', JSON.stringify(lessonPeriods));
-  }, [lessonPeriods]);
 
   useEffect(() => {
     localStorage.setItem('simka_screens', JSON.stringify(screens));
@@ -261,8 +272,8 @@ export default function App() {
   };
 
   // Find active board
-  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0] || INITIAL_BOARDS[0];
-  const activeBoardName = activeBoard?.name || 'Papan Utama';
+  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0] || null;
+  const activeBoardName = activeBoard?.name || (boards.length === 0 ? 'Belum Ada Board' : 'Papan Utama');
   const totalSlidesCount = activeBoard?.slides?.filter(s => s.enabled)?.length || 0;
 
   if (isInitializing) {

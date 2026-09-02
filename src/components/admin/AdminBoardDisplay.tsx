@@ -34,6 +34,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { slideService } from '../../services/slideService';
+import { settingsService, DEFAULT_HEADER_THEME } from '../../services/settingsService';
 import { isSupabaseConfigured, supabase, getPublicUrl } from '../../lib/supabase';
 import { LayoutThreePhotos } from '../layouts/LayoutThreePhotos';
 import { LayoutVideoFullscreen } from '../layouts/LayoutVideoFullscreen';
@@ -84,84 +85,100 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   const [selectedBoardId, setSelectedBoardId] = useState<string>(activeBoardId || boards[0]?.id || '');
   const currentBoard = boards.find(b => b.id === selectedBoardId) || boards[0] || { id: 'default', name: 'Board Utama', isActive: true, slides: [] };
 
-  const currentTheme = config.headerThemeConfig || {
-    preset: 'cyan-default',
-    background: '#0096D6',
-    text: '#FFFFFF',
-    brandBg: '#003B5C',
-    brandText: '#54D6FF',
-    dateText: '#FFFFFF',
-    clockBg: '#002840',
-    clockText: '#FFD166',
-    accent: '#00E5FF',
-    autoContrast: true
-  };
+  const currentTheme = config.headerThemeConfig || DEFAULT_HEADER_THEME;
 
-  const [headerThemePreset, setHeaderThemePreset] = useState(currentTheme.preset);
-  const [headerBg, setHeaderBg] = useState(currentTheme.background);
-  const [headerText, setHeaderText] = useState(currentTheme.text);
-  const [brandBg, setBrandBg] = useState(currentTheme.brandBg);
-  const [brandText, setBrandText] = useState(currentTheme.brandText);
-  const [dateText, setDateText] = useState(currentTheme.dateText);
-  const [clockBg, setClockBg] = useState(currentTheme.clockBg);
-  const [clockText, setClockText] = useState(currentTheme.clockText);
-  const [accent, setAccent] = useState(currentTheme.accent);
-  const [autoContrast, setAutoContrast] = useState(currentTheme.autoContrast);
+  const [headerThemePreset, setHeaderThemePreset] = useState(currentTheme.preset || 'cyan');
+  const [headerBg, setHeaderBg] = useState(currentTheme.background || '#009FE3');
+  const [headerText, setHeaderText] = useState(currentTheme.text || '#FFFFFF');
+  const [brandBg, setBrandBg] = useState(currentTheme.brandBg || '#003B5C');
+  const [brandText, setBrandText] = useState(currentTheme.brand || currentTheme.brandText || '#FFFFFF');
+  const [dateText, setDateText] = useState(currentTheme.date || currentTheme.dateText || '#FFFFFF');
+  const [clockBg, setClockBg] = useState(currentTheme.clockBackground || currentTheme.clockBg || '#06243A');
+  const [clockText, setClockText] = useState(currentTheme.clockText || '#FFD166');
+  const [accent, setAccent] = useState(currentTheme.accent || '#00D9FF');
+  const [autoContrast, setAutoContrast] = useState(currentTheme.autoContrast !== undefined ? currentTheme.autoContrast : true);
+  const [isSavingHeader, setIsSavingHeader] = useState(false);
   const [savedHeaderSuccess, setSavedHeaderSuccess] = useState(false);
+  
   const [boardToDelete, setBoardToDelete] = useState<BoardItem | null>(null);
+  const [isDeletingBoard, setIsDeletingBoard] = useState(false);
+
+  // Sync state if headerThemeConfig changes from outside/realtime
+  React.useEffect(() => {
+    if (config.headerThemeConfig) {
+      const tc = config.headerThemeConfig;
+      setHeaderThemePreset(tc.preset || 'cyan');
+      setHeaderBg(tc.background || '#009FE3');
+      setHeaderText(tc.text || '#FFFFFF');
+      setBrandBg(tc.brandBg || '#003B5C');
+      setBrandText(tc.brand || tc.brandText || '#FFFFFF');
+      setDateText(tc.date || tc.dateText || '#FFFFFF');
+      setClockBg(tc.clockBackground || tc.clockBg || '#06243A');
+      setClockText(tc.clockText || '#FFD166');
+      setAccent(tc.accent || '#00D9FF');
+      if (tc.autoContrast !== undefined) {
+        setAutoContrast(tc.autoContrast);
+      }
+    }
+  }, [config.headerThemeConfig]);
 
   const headerThemes = [
     {
-      id: 'cyan-default',
-      name: 'Cyan Biru (Default SIMKA)',
-      background: '#0096D6',
+      id: 'cyan',
+      name: 'CYAN BIRU',
+      description: 'Tema Biru Langit Standar SIMKA',
+      background: '#009FE3',
       text: '#FFFFFF',
       brandBg: '#003B5C',
-      brandText: '#54D6FF',
+      brandText: '#FFFFFF',
       dateText: '#FFFFFF',
-      clockBg: '#002840',
+      clockBg: '#06243A',
       clockText: '#FFD166',
-      accent: '#00E5FF'
+      accent: '#00D9FF'
     },
     {
-      id: 'white-clean',
-      name: 'Putih Bersih & Hitam Kontras',
+      id: 'white',
+      name: 'PUTIH BERSIH',
+      description: 'Latar Putih Minimalis & Teks Hitam Kontras',
       background: '#FFFFFF',
       text: '#18181B',
-      brandBg: '#18181B',
-      brandText: '#FFD166',
+      brandBg: '#E4E4E7',
+      brandText: '#18181B',
       dateText: '#18181B',
       clockBg: '#18181B',
       clockText: '#FFD166',
       accent: '#18181B'
     },
     {
-      id: 'yellow-high',
-      name: 'Kuning Kontras Tinggi',
+      id: 'yellow',
+      name: 'KUNING KONTRAS TINGGI',
+      description: 'Warna Kuning Perhatian Tinggi',
       background: '#F9C74F',
       text: '#18181B',
-      brandBg: '#18181B',
-      brandText: '#F9C74F',
+      brandBg: '#D99B00',
+      brandText: '#18181B',
       dateText: '#18181B',
       clockBg: '#18181B',
       clockText: '#FFFFFF',
       accent: '#18181B'
     },
     {
-      id: 'navy-glow',
-      name: 'Biru Navy Gelap & Cyan',
+      id: 'navy',
+      name: 'BIRU NAVY',
+      description: 'Navy Gelap Elegan & Aksen Cyan',
       background: '#0A192F',
       text: '#00E5FF',
       brandBg: '#002840',
-      brandText: '#FFD166',
+      brandText: '#00E5FF',
       dateText: '#FFFFFF',
       clockBg: '#001D3D',
       clockText: '#FFD166',
       accent: '#00E5FF'
     },
     {
-      id: 'black-modern',
-      name: 'Hitam Modern',
+      id: 'black',
+      name: 'HITAM MODERN',
+      description: 'Latar Gelap Pekat Kontemporer',
       background: '#18181B',
       text: '#FFFFFF',
       brandBg: '#000000',
@@ -172,8 +189,9 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       accent: '#38BDF8'
     },
     {
-      id: 'emerald-green',
-      name: 'Hijau Emerald Sekolah',
+      id: 'emerald',
+      name: 'HIJAU EMERALD SEKOLAH',
+      description: 'Nuansa Edukasi Hijau Sejuk',
       background: '#0D6E6E',
       text: '#FFFFFF',
       brandBg: '#042424',
@@ -185,21 +203,83 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     }
   ];
 
+  const isLightColor = (hex: string) => {
+    const cleanHex = hex.replace('#', '');
+    if (cleanHex.length !== 6) return false;
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 155;
+  };
+
+  const handleHeaderBgChange = (newBg: string) => {
+    setHeaderBg(newBg);
+    if (autoContrast) {
+      const light = isLightColor(newBg);
+      setHeaderText(light ? '#18181B' : '#FFFFFF');
+      setDateText(light ? '#18181B' : '#FFFFFF');
+    }
+  };
+
+  const handleSaveHeaderTheme = async () => {
+    setIsSavingHeader(true);
+    const themePayload = {
+      preset: headerThemePreset,
+      background: headerBg,
+      text: headerText,
+      brand: brandText,
+      brandBg: brandBg,
+      brandText: brandText,
+      date: dateText,
+      dateText: dateText,
+      clockBackground: clockBg,
+      clockBg: clockBg,
+      clockText: clockText,
+      accent: accent,
+      autoContrast: autoContrast
+    };
+
+    try {
+      await settingsService.saveHeaderTheme(themePayload);
+      if (onUpdateConfig) {
+        onUpdateConfig({
+          headerThemeConfig: themePayload
+        });
+      }
+      setSavedHeaderSuccess(true);
+      setTimeout(() => setSavedHeaderSuccess(false), 2500);
+    } catch (err: any) {
+      console.error('Error saving header theme:', err);
+      alert(`Gagal menyimpan tema header: ${err?.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsSavingHeader(false);
+    }
+  };
+
   const handleDeleteBoardConfirmed = async () => {
     if (!boardToDelete) return;
+    setIsDeletingBoard(true);
     try {
       await slideService.deleteBoard(boardToDelete.id);
       const updatedBoards = await slideService.getBoards();
       onUpdateBoards(updatedBoards);
+      
       if (updatedBoards.length > 0) {
-        setSelectedBoardId(updatedBoards[0].id);
+        const nextBoard = updatedBoards.find(b => b.id !== boardToDelete.id) || updatedBoards[0];
+        setSelectedBoardId(nextBoard.id);
+        if (boardToDelete.isActive || activeBoardId === boardToDelete.id) {
+          onSetActiveBoard(nextBoard.id);
+        }
       } else {
         setSelectedBoardId('');
       }
       setBoardToDelete(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error deleting board:', err);
-      alert('Gagal menghapus board dari database.');
+      alert(`Gagal menghapus board dari database: ${err?.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsDeletingBoard(false);
     }
   };
 
@@ -934,40 +1014,59 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           </div>
         </div>
 
-        {/* Board Details Header Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#FFF8E7] p-4 rounded-xl border-2 border-[#18181B]">
-          <div>
-            <h3 className="text-lg font-black font-display text-[#18181B]">{currentBoard.name}</h3>
-            <p className="text-xs text-neutral-600">{currentBoard.description}</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-neutral-700">
-            <span>Total: <strong>{currentBoard.slides.length} Slide</strong></span>
-            <span>•</span>
-            <span>Total Durasi: <strong>~{currentBoard.slides.reduce((acc, s) => acc + (s.durationSec || 10), 0)} Detik</strong></span>
-          </div>
-        </div>
-
-        {/* Action Button: Tambah Slide */}
-        <div className="flex justify-between items-center">
-          <div className="text-sm font-display font-black text-[#18181B] uppercase tracking-wider flex items-center gap-2">
-            <span>DAFTAR URUTAN SLIDE PADA BOARD</span>
-          </div>
-
-          {isAdmin ? (
-            <button
-              id="btn-tambah-slide"
-              onClick={() => setIsAddSlideModalOpen(true)}
-              className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-4 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
-            >
-              <Plus className="w-4 h-4 text-[#18181B]" />
-              <span>+ TAMBAH SLIDE</span>
-            </button>
-          ) : (
-            <div className="px-3.5 py-1.5 bg-neutral-100 border border-neutral-300 rounded-lg text-neutral-600 text-xs font-mono font-bold">
-              MODE BACA (READ-ONLY)
+        {boards.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border-2 border-dashed border-neutral-300 text-center space-y-4">
+            <Layers className="w-12 h-12 text-neutral-400" />
+            <div>
+              <p className="text-base font-black font-display text-[#18181B]">Belum Ada Board Siaran</p>
+              <p className="text-xs text-neutral-500 max-w-sm mt-1">Seluruh board telah dihapus dari Supabase. Buat board baru untuk mulai menyiarkan slide.</p>
             </div>
-          )}
-        </div>
+            {isAdmin && (
+              <button
+                onClick={() => setIsNewBoardModalOpen(true)}
+                className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-6 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+              >
+                <Plus className="w-4 h-4 text-[#18181B]" />
+                <span>+ TAMBAH BOARD BARU</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Board Details Header Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#FFF8E7] p-4 rounded-xl border-2 border-[#18181B]">
+              <div>
+                <h3 className="text-lg font-black font-display text-[#18181B]">{currentBoard.name}</h3>
+                <p className="text-xs text-neutral-600">{currentBoard.description}</p>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-mono font-bold text-neutral-700">
+                <span>Total: <strong>{currentBoard.slides.length} Slide</strong></span>
+                <span>•</span>
+                <span>Total Durasi: <strong>~{currentBoard.slides.reduce((acc, s) => acc + (s.durationSec || 10), 0)} Detik</strong></span>
+              </div>
+            </div>
+
+            {/* Action Button: Tambah Slide */}
+            <div className="flex justify-between items-center">
+              <div className="text-sm font-display font-black text-[#18181B] uppercase tracking-wider flex items-center gap-2">
+                <span>DAFTAR URUTAN SLIDE PADA BOARD</span>
+              </div>
+
+              {isAdmin ? (
+                <button
+                  id="btn-tambah-slide"
+                  onClick={() => setIsAddSlideModalOpen(true)}
+                  className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-4 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+                >
+                  <Plus className="w-4 h-4 text-[#18181B]" />
+                  <span>+ TAMBAH SLIDE</span>
+                </button>
+              ) : (
+                <div className="px-3.5 py-1.5 bg-neutral-100 border border-neutral-300 rounded-lg text-neutral-600 text-xs font-mono font-bold">
+                  MODE BACA (READ-ONLY)
+                </div>
+              )}
+            </div>
 
         {/* Slide List (Drag/Reorder, Duplicate, Edit, Delete) */}
         <div className="space-y-3">
@@ -1096,6 +1195,8 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
 
       {/* =========================================================================
@@ -1789,30 +1890,26 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
 
           {isAdmin && (
             <button
-              onClick={() => {
-                if (onUpdateConfig) {
-                  onUpdateConfig({
-                    headerThemeConfig: {
-                      preset: headerThemePreset,
-                      background: headerBg,
-                      text: headerText,
-                      brandBg: brandBg,
-                      brandText: brandText,
-                      dateText: dateText,
-                      clockBg: clockBg,
-                      clockText: clockText,
-                      accent: accent,
-                      autoContrast: autoContrast
-                    }
-                  });
-                  setSavedHeaderSuccess(true);
-                  setTimeout(() => setSavedHeaderSuccess(false), 2500);
-                }
-              }}
-              className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-6 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+              disabled={isSavingHeader}
+              onClick={handleSaveHeaderTheme}
+              className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-6 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {savedHeaderSuccess ? <Check className="w-4 h-4 text-emerald-300" /> : <Sparkles className="w-4 h-4 text-[#FFD166]" />}
-              <span>{savedHeaderSuccess ? 'BERHASIL DISIMPAN' : 'SIMPAN TEMA HEADER'}</span>
+              {savedHeaderSuccess ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>BERHASIL DISIMPAN</span>
+                </>
+              ) : isSavingHeader ? (
+                <>
+                  <Sparkles className="w-4 h-4 animate-spin text-[#18181B]" />
+                  <span>MENYIMPAN...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-[#18181B]" />
+                  <span>SIMPAN TEMA HEADER</span>
+                </>
+              )}
             </button>
           )}
         </div>
@@ -1871,13 +1968,14 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
               >
                 <div className="space-y-1">
                   <div className="font-display font-black text-xs text-[#18181B]">{th.name}</div>
+                  <div className="text-[11px] text-neutral-500 font-medium">{th.description}</div>
                   <div className="flex items-center gap-1.5 pt-1">
-                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.background }}></span>
-                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.brandBg }}></span>
-                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.clockBg }}></span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.background }} title="Latar"></span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.brandBg }} title="Brand"></span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.clockBg }} title="Jam"></span>
                   </div>
                 </div>
-                {headerThemePreset === th.id && <CheckCircle2 className="w-4 h-4 text-[#0096D6]" />}
+                {headerThemePreset === th.id && <CheckCircle2 className="w-5 h-5 text-[#0096D6]" />}
               </button>
             ))}
           </div>
@@ -1888,8 +1986,18 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           <div className="space-y-1.5">
             <label className="text-xs font-mono font-bold text-neutral-700">Warna Latar Header:</label>
             <div className="flex items-center gap-2">
-              <input type="color" value={headerBg} onChange={(e) => setHeaderBg(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
-              <input type="text" value={headerBg} onChange={(e) => setHeaderBg(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+              <input 
+                type="color" 
+                value={headerBg} 
+                onChange={(e) => handleHeaderBgChange(e.target.value)} 
+                className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" 
+              />
+              <input 
+                type="text" 
+                value={headerBg} 
+                onChange={(e) => handleHeaderBgChange(e.target.value)} 
+                className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" 
+              />
             </div>
           </div>
 
@@ -1949,6 +2057,20 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Auto Contrast Setting */}
+        <div className="flex items-center gap-2 pt-2">
+          <input
+            type="checkbox"
+            id="header-auto-contrast"
+            checked={autoContrast}
+            onChange={(e) => setAutoContrast(e.target.checked)}
+            className="w-4 h-4 rounded border-2 border-[#18181B] text-[#0096D6] focus:ring-0 cursor-pointer"
+          />
+          <label htmlFor="header-auto-contrast" className="text-xs font-mono font-bold text-neutral-800 cursor-pointer select-none">
+            KONTRAS TINGGI OTOMATIS (Menyesuaikan teks secara otomatis berdasarkan kecerahan latar belakang)
+          </label>
+        </div>
       </div>
 
       {/* Board Delete Confirmation Modal */}
@@ -1960,27 +2082,36 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                 <AlertCircle className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-xl font-black font-display text-[#18181B]">Hapus Board?</h3>
+                <h3 className="text-xl font-black font-display text-[#18181B]">HAPUS BOARD?</h3>
                 <p className="text-xs text-neutral-600">Board "{boardToDelete.name}" beserta seluruh slide di dalamnya akan dihapus.</p>
               </div>
             </div>
 
             <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-mono">
-              ⚠️ Peringatan: Tindakan ini menghapus data slide dan media terkait dari database Supabase secara permanen.
+              ⚠️ Peringatan: Tindakan ini menghapus data slide dari database Supabase secara permanen. File media di galeri tetap aman.
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
+                disabled={isDeletingBoard}
                 onClick={() => setBoardToDelete(null)}
-                className="px-5 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-bold text-xs bg-white hover:bg-neutral-100 text-[#18181B]"
+                className="px-5 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-bold text-xs bg-white hover:bg-neutral-100 text-[#18181B] disabled:opacity-50"
               >
                 BATAL
               </button>
               <button
+                disabled={isDeletingBoard}
                 onClick={handleDeleteBoardConfirmed}
-                className="px-6 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-black text-xs bg-rose-500 hover:bg-rose-600 text-white shadow-[2px_2px_0px_#18181B]"
+                className="px-6 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-black text-xs bg-rose-500 hover:bg-rose-600 text-white shadow-[2px_2px_0px_#18181B] disabled:opacity-50 flex items-center gap-2"
               >
-                HAPUS BOARD
+                {isDeletingBoard ? (
+                  <>
+                    <Trash2 className="w-4 h-4 animate-spin" />
+                    <span>MENGHAPUS...</span>
+                  </>
+                ) : (
+                  <span>HAPUS BOARD</span>
+                )}
               </button>
             </div>
           </div>

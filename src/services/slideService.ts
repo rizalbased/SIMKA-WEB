@@ -115,18 +115,43 @@ export const slideService = {
   },
 
   async deleteBoard(boardId: string) {
-    const { data: slides, error: fetchError } = await supabase
-      .from('slides')
-      .select('id')
-      .eq('board_id', boardId);
+    try {
+      // 1. Primary: Call Supabase RPC delete_board
+      let { data, error } = await supabase.rpc('delete_board', {
+        p_board_id: boardId
+      });
 
-    if (fetchError) throw fetchError;
+      if (error && (error.message?.includes('p_board_id') || error.code === '42883')) {
+        // Retry with board_id parameter if function signature differs
+        const res2 = await supabase.rpc('delete_board', {
+          board_id: boardId
+        } as any);
+        data = res2.data;
+        error = res2.error;
+      }
 
-    if (slides && slides.length > 0) {
-      const slideIds = slides.map(s => s.id);
-      await supabase.from('slide_media').delete().in('slide_id', slideIds);
-      const { error: deleteErr } = await supabase.from('slides').delete().eq('board_id', boardId);
-      if (deleteErr) throw deleteErr;
+      if (error) {
+        console.warn('RPC delete_board returned error, falling back to direct delete:', error);
+        // Fallback: Delete slide_media relations and slides only (never media records or storage files)
+        const { data: slides, error: fetchError } = await supabase
+          .from('slides')
+          .select('id')
+          .eq('board_id', boardId);
+
+        if (fetchError) throw fetchError;
+
+        if (slides && slides.length > 0) {
+          const slideIds = slides.map(s => s.id);
+          await supabase.from('slide_media').delete().in('slide_id', slideIds);
+          const { error: deleteErr } = await supabase.from('slides').delete().eq('board_id', boardId);
+          if (deleteErr) throw deleteErr;
+        }
+      }
+
+      return data;
+    } catch (err: any) {
+      console.error('Error in deleteBoard:', err);
+      throw err;
     }
   },
 

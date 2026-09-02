@@ -151,10 +151,13 @@ export interface HeaderThemeConfig {
   preset: string;
   background: string;
   text: string;
+  brand?: string;
   brandBg: string;
-  brandText: string;
-  dateText: string;
-  clockBg: string;
+  brandText?: string;
+  date?: string;
+  dateText?: string;
+  clockBackground?: string;
+  clockBg?: string;
   clockText: string;
   accent: string;
   autoContrast: boolean;
