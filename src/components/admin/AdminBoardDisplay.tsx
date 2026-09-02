@@ -33,7 +33,7 @@ import {
   CheckCircle2,
   Calendar
 } from 'lucide-react';
-import { slideService } from '../../services/slideService';
+import { slideService, isUUID } from '../../services/slideService';
 import { settingsService, DEFAULT_HEADER_THEME } from '../../services/settingsService';
 import { isSupabaseConfigured, supabase, getPublicUrl } from '../../lib/supabase';
 import { LayoutThreePhotos } from '../layouts/LayoutThreePhotos';
@@ -322,12 +322,14 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       }
       
       const nextPos = (editingSlide.slideMedia || []).length;
-      const { error: smError } = await supabase.from('slide_media').insert({
-        slide_id: editingSlide.id,
-        media_id: mediaData.id,
-        posisi: nextPos
-      });
-      if (smError) throw smError;
+      if (isUUID(editingSlide.id) && isUUID(mediaData.id)) {
+        const { error: smError } = await supabase.from('slide_media').insert({
+          slide_id: editingSlide.id,
+          media_id: mediaData.id,
+          posisi: nextPos
+        });
+        if (smError) console.warn('Could not insert immediate slide_media relation:', smError);
+      }
       
       // Update local state for immediate feedback
       setEditingSlide({
@@ -351,13 +353,13 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     if (!editingSlide || !isAdmin) return;
     
     try {
-      if (isSupabaseConfigured() && !editingSlide.id.includes('temp-')) {
+      if (isSupabaseConfigured() && isUUID(editingSlide.id) && isUUID(mediaId)) {
         const { error } = await supabase.from('slide_media')
           .delete()
           .eq('slide_id', editingSlide.id)
           .eq('media_id', mediaId);
           
-        if (error) throw error;
+        if (error) console.warn('Could not delete slide_media relation immediately:', error);
       }
       
       setEditingSlide({
@@ -570,24 +572,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       isActive: false,
       loopMode: 'loop_forever',
       createdAt: new Date().toISOString().split('T')[0],
-      slides: [
-        {
-          id: `sld-${Date.now()}-1`,
-          title: 'SLIDE 1 — 3 FOTO POTRAIT',
-          type: '3_FOTO',
-          durationSec: 10,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            photos: [
-              photoMedia[0]?.url || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[1]?.url || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[2]?.url || 'https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=1000&q=80'
-            ]
-          }
-        }
-      ]
+      slides: []
     };
     onUpdateBoards([...boards, newBoard]);
     setSelectedBoardId(newBoard.id);
@@ -652,21 +637,21 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         setIsAddSlideModalOpen(false);
         startEditingSlide(newSlide);
       }
-    } catch (err) {
-      console.error(err);
-      alert('Gagal membuat slide.');
+    } catch (err: any) {
+      console.error('Error creating slide:', err);
+      alert(`Gagal membuat slide: ${err?.message || 'Terjadi kesalahan'}`);
     }
   };
 
   const handleDuplicateSlide = async (slide: SlideItem) => {
     if (!isAdmin) return;
     try {
-      if (isSupabaseConfigured() && !slide.id.includes('temp-')) {
+      if (isSupabaseConfigured()) {
         const clonedSlideData = {
           ...slide,
           id: `temp-${Date.now()}`, // Temporary ID for saveSlide to insert as a new record
           title: `${slide.title} (SALINAN)`,
-          content: JSON.parse(JSON.stringify(slide.content))
+          content: JSON.parse(JSON.stringify(slide.content || {}))
         };
         const mediaWithPositions = (slide.slideMedia || []).map((m: any, index: number) => {
           if (!m) return null;
@@ -685,7 +670,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           ...slide,
           id: `sld-${Date.now()}`,
           title: `${slide.title} (SALINAN)`,
-          content: JSON.parse(JSON.stringify(slide.content))
+          content: JSON.parse(JSON.stringify(slide.content || {}))
         };
 
         const newSlides = [...currentBoard.slides];
@@ -697,27 +682,19 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         };
         handleBoardUpdate(updatedBoard);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('SIMKA DUPLICATE SLIDE ERROR:', err);
-      alert('Gagal menduplikasi slide ke Supabase.');
+      alert(`Gagal menduplikasi slide: ${err?.message || 'Terjadi kesalahan'}`);
     }
   };
 
   const handleConfirmDeleteSlide = async () => {
     if (!isAdmin || !slideToDelete) return;
     try {
-      if (isSupabaseConfigured() && !slideToDelete.id.includes('temp-')) {
+      if (isSupabaseConfigured()) {
         await slideService.deleteSlide(slideToDelete.id);
         const dbBoards = await slideService.getBoards();
         onUpdateBoards(dbBoards);
-        
-        // Audit after delete
-        const { data: slidesLeft, error: fetchErr } = await supabase
-          .from('slides')
-          .select('*');
-        if (!fetchErr) {
-          console.log('SLIDES AFTER DELETE:', slidesLeft);
-        }
       } else {
         const newSlides = currentBoard.slides.filter(s => s.id !== slideToDelete.id);
         const updatedBoard = {
@@ -727,9 +704,9 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         handleBoardUpdate(updatedBoard);
       }
       setSlideToDelete(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('SIMKA DELETE SLIDE ERROR:', err);
-      alert('Slide gagal dihapus dari Supabase.');
+      alert(`Slide gagal dihapus: ${err?.message || 'Terjadi kesalahan'}`);
     }
   };
 
@@ -797,16 +774,20 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         finalizedSlide.id = savedData.id;
       }
       
-      const newSlides = currentBoard.slides.map(s => s.id === finalizedSlide.id || (s.id.includes('temp-') && s.id === finalizedSlide.id) ? finalizedSlide : s);
+      const newSlides = currentBoard.slides.map(s => 
+        (s.id === updatedSlide.id || s.id === finalizedSlide.id || (s.id.includes('temp-') && s.id === finalizedSlide.id)) 
+          ? finalizedSlide 
+          : s
+      );
       const updatedBoard = {
         ...currentBoard,
         slides: newSlides
       };
       handleBoardUpdate(updatedBoard);
       setEditingSlide(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving to Supabase:', err);
-      alert('Gagal menyimpan ke database.');
+      alert(`Gagal menyimpan ke database: ${err?.message || 'Terjadi kesalahan'}`);
     }
   };
 

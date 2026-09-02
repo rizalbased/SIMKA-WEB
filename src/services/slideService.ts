@@ -1,6 +1,11 @@
 import { supabase, getPublicUrl } from '../lib/supabase';
 import { BoardItem, MediaItem } from '../types';
 
+export const isUUID = (str: any): boolean => {
+  if (typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+};
+
 export const slideService = {
   async getBoards(): Promise<BoardItem[]> {
     try {
@@ -141,8 +146,10 @@ export const slideService = {
         if (fetchError) throw fetchError;
 
         if (slides && slides.length > 0) {
-          const slideIds = slides.map(s => s.id);
-          await supabase.from('slide_media').delete().in('slide_id', slideIds);
+          const slideIds = slides.map(s => s.id).filter(isUUID);
+          if (slideIds.length > 0) {
+            await supabase.from('slide_media').delete().in('slide_id', slideIds);
+          }
           const { error: deleteErr } = await supabase.from('slides').delete().eq('board_id', boardId);
           if (deleteErr) throw deleteErr;
         }
@@ -156,48 +163,58 @@ export const slideService = {
   },
 
   async saveSlide(boardId: string, slide: any, mediaIds: any[] = []) {
-    // 1. Upsert slide
+    // 1. Upsert slide payload
+    const slidePayload: any = {
+      board_id: boardId,
+      urutan: typeof slide.urutan === 'number' ? slide.urutan : 0,
+      judul: slide.title || 'Slide Tanpa Judul',
+      tipe: slide.type || '3_FOTO',
+      durasi: slide.durationSec || 10,
+      efek_transisi: slide.transition || 'fade',
+      durasi_transisi: slide.transitionDurationMs || 800,
+      aktif: slide.enabled !== undefined ? slide.enabled : true,
+      config: slide.content || {}
+    };
+
+    // Only supply ID if it is a valid UUID to prevent PostgreSQL error 22P02
+    if (slide.id && isUUID(slide.id)) {
+      slidePayload.id = slide.id;
+    }
+
     const { data: slideData, error: slideError } = await supabase
       .from('slides')
-      .upsert({
-        id: slide.id.includes('temp-') ? undefined : slide.id, // Handle new slides
-        board_id: boardId,
-        urutan: 0, // Should be managed or calculated
-        judul: slide.title,
-        tipe: slide.type,
-        durasi: slide.durationSec,
-        efek_transisi: slide.transition,
-        durasi_transisi: slide.transitionDurationMs,
-        aktif: slide.enabled,
-        config: slide.content
-      })
+      .upsert(slidePayload)
       .select()
       .single();
 
     if (slideError) throw slideError;
 
     // 2. Update media relations (always clear old, insert if we have media items)
-    await supabase.from('slide_media').delete().eq('slide_id', slideData.id);
+    if (slideData?.id && isUUID(slideData.id)) {
+      await supabase.from('slide_media').delete().eq('slide_id', slideData.id);
 
-    if (mediaIds && mediaIds.length > 0) {
-      const relations = mediaIds.map((item, index) => {
-        if (typeof item === 'object' && item !== null) {
+      if (mediaIds && mediaIds.length > 0) {
+        const relations = mediaIds.map((item, index) => {
+          if (typeof item === 'object' && item !== null) {
+            return {
+              slide_id: slideData.id,
+              media_id: item.mediaId || item.id,
+              posisi: typeof item.posisi === 'number' ? item.posisi : index
+            };
+          }
           return {
             slide_id: slideData.id,
-            media_id: item.mediaId || item.id,
-            posisi: typeof item.posisi === 'number' ? item.posisi : index
+            media_id: item,
+            posisi: index
           };
-        }
-        return {
-          slide_id: slideData.id,
-          media_id: item,
-          posisi: index
-        };
-      }).filter((rel: any) => !!rel.media_id);
+        }).filter((rel: any) => !!rel.media_id && isUUID(rel.media_id));
 
-      if (relations.length > 0) {
-        const { error: relError } = await supabase.from('slide_media').insert(relations);
-        if (relError) throw relError;
+        if (relations.length > 0) {
+          const { error: relError } = await supabase.from('slide_media').insert(relations);
+          if (relError) {
+            console.warn('Error inserting slide_media relations:', relError);
+          }
+        }
       }
     }
 
@@ -205,26 +222,37 @@ export const slideService = {
   },
 
   async deleteSlide(slideId: string) {
-    // 1. Delete slide_media relations first to avoid foreign key violations
-    const { error: relError } = await supabase
-      .from('slide_media')
-      .delete()
-      .eq('slide_id', slideId);
-    
-    if (relError) {
-      console.error('Error deleting slide_media relations:', relError);
-      throw relError;
-    }
+    if (!slideId) return;
 
-    // 2. Delete the slide itself
-    const { error: slideError } = await supabase
-      .from('slides')
-      .delete()
-      .eq('id', slideId);
+    if (isUUID(slideId)) {
+      // 1. Delete slide_media relations first to avoid foreign key violations
+      const { error: relError } = await supabase
+        .from('slide_media')
+        .delete()
+        .eq('slide_id', slideId);
+      
+      if (relError) {
+        console.warn('Error deleting slide_media relations:', relError);
+      }
 
-    if (slideError) {
-      console.error('Error deleting slide from Supabase:', slideError);
-      throw slideError;
+      // 2. Delete the slide itself
+      const { error: slideError } = await supabase
+        .from('slides')
+        .delete()
+        .eq('id', slideId);
+
+      if (slideError) {
+        console.error('Error deleting slide from Supabase:', slideError);
+        throw slideError;
+      }
+    } else {
+      // In case slides.id is text in database
+      try {
+        await supabase.from('slide_media').delete().eq('slide_id', slideId);
+        await supabase.from('slides').delete().eq('id', slideId);
+      } catch (e) {
+        console.warn('Delete non-UUID slide fallback:', e);
+      }
     }
   }
 };
