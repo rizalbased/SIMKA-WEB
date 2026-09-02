@@ -3,31 +3,36 @@ import { LessonPeriod } from '../types';
 
 export const jadwalService = {
   async getJadwal(): Promise<LessonPeriod[]> {
-    const { data, error } = await supabase
-      .from('jadwal_les')
-      .select('*')
-      .order('order_index', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('jadwal_les')
+        .select('*')
+        .order('order_index', { ascending: true });
 
-    if (error) {
-      if (error.code === 'PGRST205') {
-        console.warn('Table "jadwal_les" does not exist yet. Please run schema.sql in Supabase.');
+      if (error) {
+        if (error.code === 'PGRST205') {
+          console.warn('Table "jadwal_les" does not exist yet. Please run schema.sql in Supabase.');
+          return [];
+        }
+        console.error('Error fetching jadwal:', error);
         return [];
       }
-      console.error('Error fetching jadwal:', error);
+
+      return data.map(item => ({
+        id: item.id,
+        name: item.name,
+        periodNumber: item.period_number,
+        startTime: item.start_time,
+        endTime: item.end_time,
+        subject: item.subject,
+        teacher: item.teacher,
+        room: item.room,
+        isBreak: item.is_break
+      }));
+    } catch (err) {
+      console.warn('Network error fetching jadwal:', err);
       return [];
     }
-
-    return data.map(item => ({
-      id: item.id,
-      name: item.name,
-      periodNumber: item.period_number,
-      startTime: item.start_time,
-      endTime: item.end_time,
-      subject: item.subject,
-      teacher: item.teacher,
-      room: item.room,
-      isBreak: item.is_break
-    }));
   },
 
   async saveJadwal(items: LessonPeriod[]) {

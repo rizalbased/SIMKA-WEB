@@ -2,24 +2,29 @@ import { supabase, BUCKET_VIDEOS } from '../lib/supabase';
 
 export const videoService = {
   async getAllVideos() {
-    const { data, error } = await supabase
-      .from('videos')
-      .select('*')
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      if (error.code === 'PGRST205') {
-        console.warn('Table "videos" does not exist yet. Please run schema.sql in Supabase.');
+      if (error) {
+        if (error.code === 'PGRST205') {
+          console.warn('Table "videos" does not exist yet. Please run schema.sql in Supabase.');
+          return [];
+        }
+        console.error('Error fetching videos:', error);
         return [];
       }
-      console.error('Error fetching videos:', error);
+
+      return data.map(v => ({
+        ...v,
+        url: supabase.storage.from(BUCKET_VIDEOS).getPublicUrl(v.file_path).data.publicUrl
+      }));
+    } catch (err) {
+      console.warn('Network error fetching videos:', err);
       return [];
     }
-
-    return data.map(v => ({
-      ...v,
-      url: supabase.storage.from(BUCKET_VIDEOS).getPublicUrl(v.file_path).data.publicUrl
-    }));
   },
 
   async uploadVideo(file: File, metadata: { width: number, height: number, duration: number }) {

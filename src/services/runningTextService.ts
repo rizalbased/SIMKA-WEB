@@ -2,21 +2,26 @@ import { supabase } from '../lib/supabase';
 
 export const runningTextService = {
   async getRunningText() {
-    const { data, error } = await supabase
-      .from('running_text')
-      .select('*')
-      .order('order_index', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('running_text')
+        .select('*')
+        .order('order_index', { ascending: true });
 
-    if (error) {
-      if (error.code === 'PGRST205') {
-        console.warn('Table "running_text" does not exist yet. Please run schema.sql in Supabase.');
+      if (error) {
+        if (error.code === 'PGRST205') {
+          console.warn('Table "running_text" does not exist yet. Please run schema.sql in Supabase.');
+          return [];
+        }
+        console.error('Error fetching running text:', error);
         return [];
       }
-      console.error('Error fetching running text:', error);
+
+      return data;
+    } catch (err) {
+      console.warn('Network error fetching running text:', err);
       return [];
     }
-
-    return data;
   },
 
   async updateRunningText(items: { id?: string, content: string, is_active: boolean }[]) {

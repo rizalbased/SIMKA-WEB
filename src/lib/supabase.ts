@@ -33,5 +33,28 @@ export const supabase = new Proxy({} as SupabaseClient, {
   }
 });
 
-export const BUCKET_MEDIA = 'media';
-export const BUCKET_VIDEOS = 'videos';
+export const BUCKET_MEDIA = 'galeri-emka';
+export const BUCKET_VIDEOS = 'galeri-emka';
+
+export async function testSupabaseConnection() {
+  console.log('--- Supabase Diagnostic Test ---');
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!url) console.error('FAIL: VITE_SUPABASE_URL is missing');
+  else console.log('PASS: VITE_SUPABASE_URL is present');
+  
+  if (!key) console.error('FAIL: VITE_SUPABASE_ANON_KEY is missing');
+  else console.log('PASS: VITE_SUPABASE_ANON_KEY is present');
+
+  if (url && key) {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      console.log('PASS: Supabase auth handshake successful');
+    } catch (err) {
+      console.error('FAIL: Supabase auth handshake failed', err);
+    }
+  }
+  console.log('--- End Diagnostic Test ---');
+}

@@ -3,31 +3,36 @@ import { MediaItem } from '../types';
 
 export const mediaService = {
   async getAllMedia(): Promise<MediaItem[]> {
-    const { data, error } = await supabase
-      .from('media')
-      .select('*')
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('media')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      if (error.code === 'PGRST205') {
-        console.warn('Table "media" does not exist yet. Please run schema.sql in Supabase.');
+      if (error) {
+        if (error.code === 'PGRST205') {
+          console.warn('Table "media" does not exist yet. Please run schema.sql in Supabase.');
+          return [];
+        }
+        console.error('Error fetching media:', error);
         return [];
       }
-      console.error('Error fetching media:', error);
+
+      return data.map(item => ({
+        id: item.id,
+        title: item.title,
+        type: item.type as any,
+        url: supabase.storage.from(BUCKET_MEDIA).getPublicUrl(item.file_path).data.publicUrl,
+        category: item.category || 'Lainnya',
+        dimensions: `${item.width} × ${item.height} px`,
+        size: (item.file_size / (1024 * 1024)).toFixed(1) + ' MB',
+        orientation: item.orientation as any,
+        dateAdded: item.created_at.split('T')[0]
+      }));
+    } catch (err) {
+      console.warn('Network error fetching media:', err);
       return [];
     }
-
-    return data.map(item => ({
-      id: item.id,
-      title: item.title,
-      type: item.type as any,
-      url: supabase.storage.from(BUCKET_MEDIA).getPublicUrl(item.file_path).data.publicUrl,
-      category: item.category || 'Lainnya',
-      dimensions: `${item.width} × ${item.height} px`,
-      size: (item.file_size / (1024 * 1024)).toFixed(1) + ' MB',
-      orientation: item.orientation as any,
-      dateAdded: item.created_at.split('T')[0]
-    }));
   },
 
   async uploadMedia(file: File, metadata: { width: number, height: number, orientation: string, type: string }): Promise<MediaItem | null> {

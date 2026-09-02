@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS running_text (
 
 -- 6. Tabel Jadwal Les
 CREATE TABLE IF NOT EXISTS jadwal_les (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY,
     name TEXT, -- Nama sesi (misal: LES 1)
     period_number INTEGER, -- Urutan jam ke-
     start_time TIME NOT NULL,
@@ -79,6 +79,38 @@ CREATE TABLE IF NOT EXISTS jadwal_les (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. Tabel Admins
+CREATE TABLE IF NOT EXISTS admins (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id),
+    name TEXT,
+    email TEXT,
+    role TEXT DEFAULT 'admin',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Tabel Categories
+CREATE TABLE IF NOT EXISTS categories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Tabel Photos
+CREATE TABLE IF NOT EXISTS photos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT NOT NULL,
+    category_id UUID REFERENCES categories(id),
+    event_date DATE,
+    is_featured BOOLEAN DEFAULT FALSE,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- AKTIFKAN ROW LEVEL SECURITY (RLS)
 ALTER TABLE media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
@@ -86,15 +118,18 @@ ALTER TABLE slides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE slide_media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE running_text ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jadwal_les ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE photos ENABLE ROW LEVEL SECURITY;
 
 -- KEBIJAKAN AKSES PUBLIK (Untuk kemudahan operasional signage)
--- Catatan: Untuk produksi, disarankan memperketat policy ini.
 DROP POLICY IF EXISTS "Public Access" ON media;
 DROP POLICY IF EXISTS "Public Access" ON videos;
 DROP POLICY IF EXISTS "Public Access" ON slides;
 DROP POLICY IF EXISTS "Public Access" ON slide_media;
 DROP POLICY IF EXISTS "Public Access" ON running_text;
 DROP POLICY IF EXISTS "Public Access" ON jadwal_les;
+DROP POLICY IF EXISTS "Public Access" ON photos;
 
 CREATE POLICY "Enable Access for All" ON media FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Enable Access for All" ON videos FOR ALL USING (true) WITH CHECK (true);
@@ -102,3 +137,20 @@ CREATE POLICY "Enable Access for All" ON slides FOR ALL USING (true) WITH CHECK 
 CREATE POLICY "Enable Access for All" ON slide_media FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Enable Access for All" ON running_text FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Enable Access for All" ON jadwal_les FOR ALL USING (true) WITH CHECK (true);
+
+-- RLS untuk Photos: Public Select, Admin CRUD
+CREATE POLICY "Public can select photos" ON photos FOR SELECT USING (true);
+CREATE POLICY "Admins can manage photos" ON photos FOR ALL USING (
+    EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid() AND role = 'admin' AND is_active = true)
+);
+
+-- RLS untuk Categories: Public Select
+CREATE POLICY "Public can select categories" ON categories FOR SELECT USING (true);
+CREATE POLICY "Admins can manage categories" ON categories FOR ALL USING (
+    EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid() AND role = 'admin' AND is_active = true)
+);
+
+-- RLS untuk Admins: Only Admins can select
+CREATE POLICY "Admins can view admins" ON admins FOR SELECT USING (
+    EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid() AND role = 'admin' AND is_active = true)
+);
