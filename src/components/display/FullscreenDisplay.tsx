@@ -44,7 +44,7 @@ export const FullscreenDisplay: React.FC<FullscreenDisplayProps> = ({
   onOpenAdmin
 }) => {
   const currentBoardId = activeBoardId || config.activeBoardId;
-  const currentBoard = boards.find(b => b.id === currentBoardId) || boards.find(b => b.isActive) || boards[0];
+  const currentBoard = boards.find(b => b.id === currentBoardId) || boards.find(b => b.isActive) || boards[0] || { id: 'default', name: 'Board Utama', isActive: true, slides: [] };
   
   const activeSlides: SlideItem[] = (currentBoard?.slides || []).filter(s => s.enabled);
   const totalSlides = activeSlides.length;

@@ -13,98 +13,120 @@ export const slideService = {
       if (slidesError) {
         if (slidesError.code === 'PGRST205') {
           console.warn('Table "slides" does not exist yet.');
-          return [
-            { id: 'slide-1', name: 'Slide 1 (Default)', isActive: true, loopMode: 'loop_forever', slides: [] },
-            { id: 'slide-2', name: 'Slide 2 (Default)', isActive: false, loopMode: 'loop_forever', slides: [] },
-            { id: 'slide-3', name: 'Slide 3 (Default)', isActive: false, loopMode: 'loop_forever', slides: [] },
-          ];
+          return [];
         }
         console.error('Error fetching slides:', slidesError);
         return [];
       }
 
-      // 2. Group by board_id
-      const boards: Record<string, BoardItem> = {
-        'slide-1': { id: 'slide-1', name: 'Slide 1', isActive: true, loopMode: 'loop_forever', slides: [] },
-        'slide-2': { id: 'slide-2', name: 'Slide 2', isActive: false, loopMode: 'loop_forever', slides: [] },
-        'slide-3': { id: 'slide-3', name: 'Slide 3', isActive: false, loopMode: 'loop_forever', slides: [] },
-      };
+      if (!slidesData || slidesData.length === 0) {
+        return [];
+      }
+
+      // 2. Group dynamically by board_id
+      const boardsMap: Record<string, BoardItem> = {};
 
       slidesData.forEach(slide => {
-        const bId = slide.board_id;
-        if (boards[bId]) {
-          // Construct slide object
-          const mediaItems = (slide.slide_media || [])
-            .sort((a: any, b: any) => a.posisi - b.posisi)
-            .map((sm: any) => {
-              if (!sm.media) return null;
-              return {
-                ...sm.media,
-                posisi: sm.posisi
-              };
-            })
-            .filter((m: any) => m !== null);
-          
-          const content: any = { ...slide.config };
-
-          // Map media based on slide type and their exact slot positions
-          if (slide.tipe === '3_FOTO' || slide.tipe === 'GALERI') {
-            const photos = ['', '', ''];
-            mediaItems.forEach((m: any, index: number) => {
-              const pos = typeof m.posisi === 'number' ? m.posisi : index;
-              if (pos >= 0 && pos < 3) {
-                photos[pos] = getPublicUrl(m.file_path);
-              }
-            });
-            content.photos = photos;
-          } else if (slide.tipe === 'FOTO_GRID' || slide.tipe === 'GRID') {
-            const grid = ['', '', '', ''];
-            mediaItems.forEach((m: any, index: number) => {
-              const pos = typeof m.posisi === 'number' ? m.posisi : index;
-              if (pos >= 0 && pos < 4) {
-                grid[pos] = getPublicUrl(m.file_path);
-              }
-            });
-            content.gridPhotos = grid;
-          } else if (slide.tipe === '1_POSTER') {
-            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-            content.posterUrl = m ? getPublicUrl(m.file_path) : '';
-          } else if (slide.tipe === '3_POSTER') {
-            const posters = ['', '', ''];
-            mediaItems.forEach((m: any, index: number) => {
-              const pos = typeof m.posisi === 'number' ? m.posisi : index;
-              if (pos >= 0 && pos < 3) {
-                posters[pos] = getPublicUrl(m.file_path);
-              }
-            });
-            content.posters = posters;
-          } else if (slide.tipe === 'FOTO_INFORMASI' || slide.tipe === 'SPLIT') {
-            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-            content.splitPhotoUrl = m ? getPublicUrl(m.file_path) : '';
-          } else if (slide.tipe === 'VIDEO') {
-            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-            content.videoUrl = m ? getPublicUrl(m.file_path) : '';
-            content.videoTitle = m ? m.title : '';
-          }
-
-          boards[bId].slides.push({
-            id: slide.id,
-            title: slide.judul,
-            type: slide.tipe as any,
-            durationSec: slide.durasi,
-            transition: slide.efek_transisi as any,
-            transitionDurationMs: slide.durasi_transisi,
-            enabled: slide.aktif,
-            content: content,
-            slideMedia: mediaItems
-          });
+        const bId = slide.board_id || 'board-main';
+        if (!boardsMap[bId]) {
+          const boardNum = Object.keys(boardsMap).length + 1;
+          boardsMap[bId] = {
+            id: bId,
+            name: `Board ${boardNum}`,
+            description: `Board digital signage ${boardNum}`,
+            isActive: Object.keys(boardsMap).length === 0,
+            loopMode: 'loop_forever',
+            slides: []
+          };
         }
+
+        // Construct slide object
+        const mediaItems = (slide.slide_media || [])
+          .sort((a: any, b: any) => a.posisi - b.posisi)
+          .map((sm: any) => {
+            if (!sm.media) return null;
+            return {
+              ...sm.media,
+              posisi: sm.posisi
+            };
+          })
+          .filter((m: any) => m !== null);
+        
+        const content: any = { ...slide.config };
+
+        // Map media based on slide type and their exact slot positions
+        if (slide.tipe === '3_FOTO' || slide.tipe === 'GALERI') {
+          const photos = ['', '', ''];
+          mediaItems.forEach((m: any, index: number) => {
+            const pos = typeof m.posisi === 'number' ? m.posisi : index;
+            if (pos >= 0 && pos < 3) {
+              photos[pos] = getPublicUrl(m.file_path);
+            }
+          });
+          content.photos = photos;
+        } else if (slide.tipe === 'FOTO_GRID' || slide.tipe === 'GRID') {
+          const grid = ['', '', '', ''];
+          mediaItems.forEach((m: any, index: number) => {
+            const pos = typeof m.posisi === 'number' ? m.posisi : index;
+            if (pos >= 0 && pos < 4) {
+              grid[pos] = getPublicUrl(m.file_path);
+            }
+          });
+          content.gridPhotos = grid;
+        } else if (slide.tipe === '1_POSTER') {
+          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+          content.posterUrl = m ? getPublicUrl(m.file_path) : '';
+        } else if (slide.tipe === '3_POSTER') {
+          const posters = ['', '', ''];
+          mediaItems.forEach((m: any, index: number) => {
+            const pos = typeof m.posisi === 'number' ? m.posisi : index;
+            if (pos >= 0 && pos < 3) {
+              posters[pos] = getPublicUrl(m.file_path);
+            }
+          });
+          content.posters = posters;
+        } else if (slide.tipe === 'FOTO_INFORMASI' || slide.tipe === 'SPLIT') {
+          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+          content.splitPhotoUrl = m ? getPublicUrl(m.file_path) : '';
+        } else if (slide.tipe === 'VIDEO') {
+          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+          content.videoUrl = m ? getPublicUrl(m.file_path) : '';
+          content.videoTitle = m ? m.title : '';
+        }
+
+        boardsMap[bId].slides.push({
+          id: slide.id,
+          title: slide.judul,
+          type: slide.tipe as any,
+          durationSec: slide.durasi,
+          transition: slide.efek_transisi as any,
+          transitionDurationMs: slide.durasi_transisi,
+          enabled: slide.aktif,
+          content: content,
+          slideMedia: mediaItems
+        });
       });
 
-      return Object.values(boards);
+      return Object.values(boardsMap);
     } catch (err) {
       console.warn('Network error fetching slides:', err);
       return [];
+    }
+  },
+
+  async deleteBoard(boardId: string) {
+    const { data: slides, error: fetchError } = await supabase
+      .from('slides')
+      .select('id')
+      .eq('board_id', boardId);
+
+    if (fetchError) throw fetchError;
+
+    if (slides && slides.length > 0) {
+      const slideIds = slides.map(s => s.id);
+      await supabase.from('slide_media').delete().in('slide_id', slideIds);
+      const { error: deleteErr } = await supabase.from('slides').delete().eq('board_id', boardId);
+      if (deleteErr) throw deleteErr;
     }
   },
 

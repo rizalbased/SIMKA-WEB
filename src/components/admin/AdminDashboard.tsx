@@ -43,7 +43,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateTab,
   onLaunchFullscreen
 }) => {
-  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0];
+  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0] || { id: 'default', name: 'Board Utama', isActive: true, slides: [] };
   const slides = activeBoard?.slides || [];
   
   const photoCount = mediaLibrary.filter(m => m.type === 'foto').length;

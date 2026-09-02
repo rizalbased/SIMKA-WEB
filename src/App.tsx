@@ -42,7 +42,7 @@ export default function App() {
 
   // Application Data States
   const [config, setConfig] = useState<DisplayConfig>(INITIAL_CONFIG);
-  const [boards, setBoards] = useState<BoardItem[]>(INITIAL_BOARDS);
+  const [boards, setBoards] = useState<BoardItem[]>([]);
   const [mediaLibrary, setMediaLibrary] = useState<MediaItem[]>([]);
   const [lessonPeriods, setLessonPeriods] = useState<LessonPeriod[]>(INITIAL_LESSON_PERIODS);
   const [screens, setScreens] = useState<ScreenDevice[]>(INITIAL_SCREENS);
@@ -147,7 +147,7 @@ export default function App() {
         ]);
 
         await refreshMedia();
-        if (dbBoards.length > 0) setBoards(dbBoards);
+        setBoards(dbBoards.length > 0 ? dbBoards : INITIAL_BOARDS);
         if (dbJadwal.length > 0) setLessonPeriods(dbJadwal);
         
         if (dbRunningText.length > 0) {
@@ -261,7 +261,7 @@ export default function App() {
   };
 
   // Find active board
-  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0];
+  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0] || INITIAL_BOARDS[0];
   const activeBoardName = activeBoard?.name || 'Papan Utama';
   const totalSlidesCount = activeBoard?.slides?.filter(s => s.enabled)?.length || 0;
 
@@ -354,6 +354,7 @@ export default function App() {
               lessonPeriods={lessonPeriods}
               onUpdateBoards={setBoards}
               onUpdateMediaLibrary={setMediaLibrary}
+              onUpdateConfig={handleUpdateConfig}
               onSetActiveBoard={handleSetActiveBoard}
               onLaunchFullscreen={() => setMode('display')}
               userRole={userProfile?.role || 'user'}

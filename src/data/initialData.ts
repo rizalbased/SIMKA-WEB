@@ -465,6 +465,18 @@ export const INITIAL_CONFIG: DisplayConfig = {
   headerRightTag: 'JAM | JADWAL LES',
   runningTextContent: 'INFORMASI EMKA • Selamat mengikuti kegiatan pembelajaran hari ini • Agenda sekolah • Informasi bimbingan belajar & ujian semester • Simak display berkala •',
   headerTheme: 'cyan-blue',
+  headerThemeConfig: {
+    preset: 'cyan-default',
+    background: '#0096D6',
+    text: '#FFFFFF',
+    brandBg: '#003B5C',
+    brandText: '#54D6FF',
+    dateText: '#FFFFFF',
+    clockBg: '#002840',
+    clockText: '#FFD166',
+    accent: '#00E5FF',
+    autoContrast: true
+  },
   contrastMode: 'broadcast-cyan',
   tickerSpeedSec: 25,
   autoAdvanceSec: 10,

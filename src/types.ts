@@ -147,6 +147,19 @@ export interface ScreenDevice {
   autoRebootTime?: string;
 }
 
+export interface HeaderThemeConfig {
+  preset: string;
+  background: string;
+  text: string;
+  brandBg: string;
+  brandText: string;
+  dateText: string;
+  clockBg: string;
+  clockText: string;
+  accent: string;
+  autoContrast: boolean;
+}
+
 export interface DisplayConfig {
   venueName: string; // e.g. "SIMKA"
   headerLeftText: string; // "SIMKA"
@@ -162,6 +175,7 @@ export interface DisplayConfig {
   showClock?: boolean;
   showDate?: boolean;
   headerTheme: 'cyan-blue' | 'yellow-contrast' | 'dark-minimal' | 'teal-clean';
+  headerThemeConfig?: HeaderThemeConfig;
   contrastMode: 'editorial-light' | 'high-contrast' | 'night-teal' | 'broadcast-cyan';
   tickerSpeedSec: number;
   autoAdvanceSec: number;

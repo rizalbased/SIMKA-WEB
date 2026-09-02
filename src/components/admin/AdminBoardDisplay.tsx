@@ -45,6 +45,14 @@ import { SignageHeader } from '../display/SignageHeader';
 import { SignageRunningText } from '../display/SignageRunningText';
 import { MediaPicker } from './MediaPicker';
 
+export const cleanSlideTitle = (title: string) => {
+  if (!title) return 'Slide Konten';
+  return title
+    .replace(/^slide\s*\d+\s*[—–-]\s*/i, '')
+    .replace(/^slide\s*\d+/i, '')
+    .trim() || title;
+};
+
 interface AdminBoardDisplayProps {
   boards: BoardItem[];
   activeBoardId: string;
@@ -53,6 +61,7 @@ interface AdminBoardDisplayProps {
   lessonPeriods?: LessonPeriod[];
   onUpdateBoards: (boards: BoardItem[]) => void;
   onUpdateMediaLibrary: (media: MediaItem[] | ((prev: MediaItem[]) => MediaItem[])) => void;
+  onUpdateConfig?: (config: Partial<DisplayConfig>) => void;
   onSetActiveBoard: (boardId: string) => void;
   onLaunchFullscreen: () => void;
   userRole?: UserRole;
@@ -66,13 +75,133 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   lessonPeriods = [],
   onUpdateBoards,
   onUpdateMediaLibrary,
+  onUpdateConfig,
   onSetActiveBoard,
   onLaunchFullscreen,
   userRole = 'admin'
 }) => {
   const isAdmin = userRole === 'admin';
-  const [selectedBoardId, setSelectedBoardId] = useState<string>(activeBoardId || boards[0]?.id);
-  const currentBoard = boards.find(b => b.id === selectedBoardId) || boards[0];
+  const [selectedBoardId, setSelectedBoardId] = useState<string>(activeBoardId || boards[0]?.id || '');
+  const currentBoard = boards.find(b => b.id === selectedBoardId) || boards[0] || { id: 'default', name: 'Board Utama', isActive: true, slides: [] };
+
+  const currentTheme = config.headerThemeConfig || {
+    preset: 'cyan-default',
+    background: '#0096D6',
+    text: '#FFFFFF',
+    brandBg: '#003B5C',
+    brandText: '#54D6FF',
+    dateText: '#FFFFFF',
+    clockBg: '#002840',
+    clockText: '#FFD166',
+    accent: '#00E5FF',
+    autoContrast: true
+  };
+
+  const [headerThemePreset, setHeaderThemePreset] = useState(currentTheme.preset);
+  const [headerBg, setHeaderBg] = useState(currentTheme.background);
+  const [headerText, setHeaderText] = useState(currentTheme.text);
+  const [brandBg, setBrandBg] = useState(currentTheme.brandBg);
+  const [brandText, setBrandText] = useState(currentTheme.brandText);
+  const [dateText, setDateText] = useState(currentTheme.dateText);
+  const [clockBg, setClockBg] = useState(currentTheme.clockBg);
+  const [clockText, setClockText] = useState(currentTheme.clockText);
+  const [accent, setAccent] = useState(currentTheme.accent);
+  const [autoContrast, setAutoContrast] = useState(currentTheme.autoContrast);
+  const [savedHeaderSuccess, setSavedHeaderSuccess] = useState(false);
+  const [boardToDelete, setBoardToDelete] = useState<BoardItem | null>(null);
+
+  const headerThemes = [
+    {
+      id: 'cyan-default',
+      name: 'Cyan Biru (Default SIMKA)',
+      background: '#0096D6',
+      text: '#FFFFFF',
+      brandBg: '#003B5C',
+      brandText: '#54D6FF',
+      dateText: '#FFFFFF',
+      clockBg: '#002840',
+      clockText: '#FFD166',
+      accent: '#00E5FF'
+    },
+    {
+      id: 'white-clean',
+      name: 'Putih Bersih & Hitam Kontras',
+      background: '#FFFFFF',
+      text: '#18181B',
+      brandBg: '#18181B',
+      brandText: '#FFD166',
+      dateText: '#18181B',
+      clockBg: '#18181B',
+      clockText: '#FFD166',
+      accent: '#18181B'
+    },
+    {
+      id: 'yellow-high',
+      name: 'Kuning Kontras Tinggi',
+      background: '#F9C74F',
+      text: '#18181B',
+      brandBg: '#18181B',
+      brandText: '#F9C74F',
+      dateText: '#18181B',
+      clockBg: '#18181B',
+      clockText: '#FFFFFF',
+      accent: '#18181B'
+    },
+    {
+      id: 'navy-glow',
+      name: 'Biru Navy Gelap & Cyan',
+      background: '#0A192F',
+      text: '#00E5FF',
+      brandBg: '#002840',
+      brandText: '#FFD166',
+      dateText: '#FFFFFF',
+      clockBg: '#001D3D',
+      clockText: '#FFD166',
+      accent: '#00E5FF'
+    },
+    {
+      id: 'black-modern',
+      name: 'Hitam Modern',
+      background: '#18181B',
+      text: '#FFFFFF',
+      brandBg: '#000000',
+      brandText: '#00E5FF',
+      dateText: '#FFFFFF',
+      clockBg: '#000000',
+      clockText: '#00E5FF',
+      accent: '#38BDF8'
+    },
+    {
+      id: 'emerald-green',
+      name: 'Hijau Emerald Sekolah',
+      background: '#0D6E6E',
+      text: '#FFFFFF',
+      brandBg: '#042424',
+      brandText: '#84E1BC',
+      dateText: '#FFFFFF',
+      clockBg: '#042424',
+      clockText: '#FFD166',
+      accent: '#2DD4BF'
+    }
+  ];
+
+  const handleDeleteBoardConfirmed = async () => {
+    if (!boardToDelete) return;
+    try {
+      await slideService.deleteBoard(boardToDelete.id);
+      const updatedBoards = await slideService.getBoards();
+      onUpdateBoards(updatedBoards);
+      if (updatedBoards.length > 0) {
+        setSelectedBoardId(updatedBoards[0].id);
+      } else {
+        setSelectedBoardId('');
+      }
+      setBoardToDelete(null);
+    } catch (err) {
+      console.error('Error deleting board:', err);
+      alert('Gagal menghapus board dari database.');
+    }
+  };
 
   // Modal states
   const [isAddSlideModalOpen, setIsAddSlideModalOpen] = useState(false);
@@ -718,23 +847,38 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             <div className="flex flex-wrap items-center gap-2 mt-2">
               {boards.map((b) => {
                 const isSelected = b.id === selectedBoardId;
+                const cleanBoardName = b.name.replace(/^slide\s*/i, 'Board ');
                 return (
-                  <button
-                    key={b.id}
-                    onClick={() => setSelectedBoardId(b.id)}
-                    className={`px-4 py-2 rounded-xl font-display font-black text-sm transition-all flex items-center gap-2 border-2 ${
-                      isSelected
-                        ? 'bg-[#0096D6] text-white border-[#18181B] shadow-[2px_2px_0px_#18181B]'
-                        : 'bg-white hover:bg-neutral-100 text-[#18181B] border-neutral-300'
-                    }`}
-                  >
-                    <span>{b.name}</span>
-                    {b.isActive && (
-                      <span className="text-[10px] bg-[#FFD166] text-[#18181B] px-1.5 py-0.5 rounded font-mono font-extrabold">
-                        AKTIF
-                      </span>
+                  <div key={b.id} className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setSelectedBoardId(b.id)}
+                      className={`px-4 py-2 rounded-xl font-display font-black text-sm transition-all flex items-center gap-2 border-2 ${
+                        isSelected
+                          ? 'bg-[#0096D6] text-white border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                          : 'bg-white hover:bg-neutral-100 text-[#18181B] border-neutral-300'
+                      }`}
+                    >
+                      <span>{cleanBoardName}</span>
+                      {b.isActive && (
+                        <span className="text-[10px] bg-[#FFD166] text-[#18181B] px-1.5 py-0.5 rounded font-mono font-extrabold">
+                          AKTIF
+                        </span>
+                      )}
+                    </button>
+
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBoardToDelete(b);
+                        }}
+                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border-2 border-rose-300 transition-colors"
+                        title="Hapus Board"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 );
               })}
 
@@ -868,7 +1012,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-display font-black text-sm text-[#18181B]">
-                        {slide.title}
+                        {cleanSlideTitle(slide.title)}
                       </h4>
                       <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#0096D6]/10 text-[#0096D6] border border-[#0096D6]/30">
                         {slide.type}
@@ -1622,6 +1766,222 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                   Tidak ada media di galeri.
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TEMA HEADER DIGITAL SIGNAGE Section */}
+      <div className="bg-[#FFFDF9] p-6 rounded-2xl border-2.5 border-[#18181B] shadow-[4px_4px_0px_#18181B] space-y-6 mt-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b-2 border-neutral-200">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-[#0096D6]">
+              <Sliders className="w-4 h-4 text-[#0096D6]" />
+              <span>PENGATURAN TEMA & WARNA HEADER</span>
+            </div>
+            <h3 className="text-2xl font-black font-display text-[#18181B] mt-1">
+              TEMA HEADER DIGITAL SIGNAGE
+            </h3>
+            <p className="text-xs text-neutral-600 mt-0.5">
+              Sesuaikan warna latar belakang, teks, logo, jam, dan elemen header siaran secara realtime.
+            </p>
+          </div>
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                if (onUpdateConfig) {
+                  onUpdateConfig({
+                    headerThemeConfig: {
+                      preset: headerThemePreset,
+                      background: headerBg,
+                      text: headerText,
+                      brandBg: brandBg,
+                      brandText: brandText,
+                      dateText: dateText,
+                      clockBg: clockBg,
+                      clockText: clockText,
+                      accent: accent,
+                      autoContrast: autoContrast
+                    }
+                  });
+                  setSavedHeaderSuccess(true);
+                  setTimeout(() => setSavedHeaderSuccess(false), 2500);
+                }
+              }}
+              className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-6 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+            >
+              {savedHeaderSuccess ? <Check className="w-4 h-4 text-emerald-300" /> : <Sparkles className="w-4 h-4 text-[#FFD166]" />}
+              <span>{savedHeaderSuccess ? 'BERHASIL DISIMPAN' : 'SIMPAN TEMA HEADER'}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Realtime Header Preview Box */}
+        <div className="space-y-2">
+          <span className="text-xs font-mono font-bold text-neutral-700 uppercase flex items-center gap-1.5">
+            <Eye className="w-3.5 h-3.5 text-[#0096D6]" />
+            PRATINJAU LANGSUNG HEADER (1920 × 62px)
+          </span>
+          <div className="rounded-xl overflow-hidden border-2 border-[#18181B] shadow-md bg-neutral-900 scale-100 origin-left">
+            <SignageHeader
+              config={{
+                ...config,
+                headerThemeConfig: {
+                  preset: headerThemePreset,
+                  background: headerBg,
+                  text: headerText,
+                  brandBg: brandBg,
+                  brandText: brandText,
+                  dateText: dateText,
+                  clockBg: clockBg,
+                  clockText: clockText,
+                  accent: accent,
+                  autoContrast: autoContrast
+                }
+              }}
+              lessonPeriods={lessonPeriods}
+            />
+          </div>
+        </div>
+
+        {/* Preset Palettes */}
+        <div className="space-y-3">
+          <span className="text-xs font-mono font-bold text-neutral-700 uppercase">PILIHAN PRESET WARNA:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {headerThemes.map(th => (
+              <button
+                key={th.id}
+                onClick={() => {
+                  setHeaderThemePreset(th.id);
+                  setHeaderBg(th.background);
+                  setHeaderText(th.text);
+                  setBrandBg(th.brandBg);
+                  setBrandText(th.brandText);
+                  setDateText(th.dateText);
+                  setClockBg(th.clockBg);
+                  setClockText(th.clockText);
+                  setAccent(th.accent);
+                }}
+                className={`p-3.5 rounded-xl border-2 text-left transition-all flex items-center justify-between ${
+                  headerThemePreset === th.id
+                    ? 'border-[#0096D6] bg-[#0096D6]/10 shadow-[2px_2px_0px_#0096D6]'
+                    : 'border-[#18181B] bg-white hover:bg-neutral-50'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="font-display font-black text-xs text-[#18181B]">{th.name}</div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.background }}></span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.brandBg }}></span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: th.clockBg }}></span>
+                  </div>
+                </div>
+                {headerThemePreset === th.id && <CheckCircle2 className="w-4 h-4 text-[#0096D6]" />}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Color Pickers Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t-2 border-neutral-200">
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Latar Header:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={headerBg} onChange={(e) => setHeaderBg(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={headerBg} onChange={(e) => setHeaderBg(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Teks Utama:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={headerText} onChange={(e) => setHeaderText(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={headerText} onChange={(e) => setHeaderText(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Brand/Logo BG:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={brandBg} onChange={(e) => setBrandBg(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={brandBg} onChange={(e) => setBrandBg(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Brand/Logo Text:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={brandText} onChange={(e) => setBrandText(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={brandText} onChange={(e) => setBrandText(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Tanggal:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={dateText} onChange={(e) => setDateText(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={dateText} onChange={(e) => setDateText(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Jam (Background):</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={clockBg} onChange={(e) => setClockBg(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={clockBg} onChange={(e) => setClockBg(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Jam (Teks):</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={clockText} onChange={(e) => setClockText(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={clockText} onChange={(e) => setClockText(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono font-bold text-neutral-700">Warna Garis Aksen/Border:</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={accent} onChange={(e) => setAccent(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Board Delete Confirmation Modal */}
+      {boardToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#FFFDF9] max-w-md w-full p-6 rounded-3xl border-3 border-[#18181B] shadow-[8px_8px_0px_#18181B] space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-rose-100 border-2 border-rose-400 rounded-2xl text-rose-600">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black font-display text-[#18181B]">Hapus Board?</h3>
+                <p className="text-xs text-neutral-600">Board "{boardToDelete.name}" beserta seluruh slide di dalamnya akan dihapus.</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-mono">
+              ⚠️ Peringatan: Tindakan ini menghapus data slide dan media terkait dari database Supabase secara permanen.
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setBoardToDelete(null)}
+                className="px-5 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-bold text-xs bg-white hover:bg-neutral-100 text-[#18181B]"
+              >
+                BATAL
+              </button>
+              <button
+                onClick={handleDeleteBoardConfirmed}
+                className="px-6 py-2.5 rounded-xl border-2 border-[#18181B] font-display font-black text-xs bg-rose-500 hover:bg-rose-600 text-white shadow-[2px_2px_0px_#18181B]"
+              >
+                HAPUS BOARD
+              </button>
             </div>
           </div>
         </div>
