@@ -825,8 +825,8 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       }
       case '1_POSTER':
         return (
-          <div className="w-full h-16 rounded overflow-hidden bg-[#050C16] border border-[#18181B] flex items-center justify-center p-0.5">
-            <img src={slide.content.posterUrl || undefined} alt="Poster" className="max-h-full object-contain" />
+          <div className="w-full h-16 rounded overflow-hidden bg-black border border-[#18181B] flex items-center justify-center p-0.5">
+            <img src={slide.content.posterUrl || undefined} alt="Poster" className="w-full h-full object-contain bg-black" />
           </div>
         );
       case 'FOTO_GRID': {
@@ -1406,7 +1406,11 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                               {mediaItem.file_type?.startsWith('video/') || mediaItem.type === 'video' ? (
                                 <video src={getPublicUrl(mediaItem.file_path || mediaItem.url)} className="w-full h-full object-cover" />
                               ) : (
-                                <img src={getPublicUrl(mediaItem.file_path || mediaItem.url)} alt={`Slot ${idx + 1}`} className="w-full h-full object-cover" />
+                                <img 
+                                  src={getPublicUrl(mediaItem.file_path || mediaItem.url)} 
+                                  alt={`Slot ${idx + 1}`} 
+                                  className={`w-full h-full ${editingSlide.type === '1_POSTER' || editingSlide.type === '3_POSTER' ? 'object-contain bg-black' : 'object-cover'}`} 
+                                />
                               )}
                               <div className="absolute top-2 left-2 bg-black/75 text-white font-mono font-black text-[9px] px-2 py-0.5 rounded border border-white/25">
                                 SLOT {idx + 1}
