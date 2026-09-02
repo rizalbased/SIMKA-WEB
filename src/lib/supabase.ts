@@ -10,9 +10,27 @@ export const isSupabaseConfigured = () => {
 };
 
 /**
+ * Recursive proxy to handle nested properties without crashing
+ * and only throw when a method is actually called.
+ */
+function createProxyFallback(path: string): any {
+  const fallback = (...args: any[]) => {
+    throw new Error(`Supabase is not configured. Accessing "${path}" failed. Please provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Settings.`);
+  };
+
+  return new Proxy(fallback, {
+    get(_, prop) {
+      if (typeof prop === 'string') {
+        return createProxyFallback(`${path}.${prop}`);
+      }
+      return undefined;
+    }
+  });
+}
+
+/**
  * Lazy getter for Supabase client.
  * This prevents the app from crashing on startup if VITE_SUPABASE_URL is missing.
- * It will only throw an error when a service actually tries to use the database.
  */
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_, prop) {
@@ -21,11 +39,10 @@ export const supabase = new Proxy({} as SupabaseClient, {
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       if (!supabaseUrl || !supabaseAnonKey) {
-        console.warn('Supabase credentials missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Settings.');
-        // Return a dummy object or throw a descriptive error when a method is called
-        return (...args: any[]) => {
-          throw new Error('Supabase is not configured. Please provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the app settings.');
-        };
+        if (typeof prop === 'string') {
+          return createProxyFallback(`supabase.${prop}`);
+        }
+        return undefined;
       }
       _supabase = createClient(supabaseUrl, supabaseAnonKey);
     }
@@ -33,8 +50,19 @@ export const supabase = new Proxy({} as SupabaseClient, {
   }
 });
 
-export const BUCKET_MEDIA = 'galeri-emka';
-export const BUCKET_VIDEOS = 'galeri-emka';
+export const BUCKET_NAME = 'galeri-emka';
+
+/**
+ * Helper to get public URL for a file in the galeri-emka bucket
+ */
+export function getPublicUrl(filePath: string): string {
+  if (!filePath) return '';
+  // Handle absolute URLs that might already be stored
+  if (filePath.startsWith('http')) return filePath;
+  
+  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
+  return data.publicUrl;
+}
 
 export async function testSupabaseConnection() {
   console.log('--- Supabase Diagnostic Test ---');

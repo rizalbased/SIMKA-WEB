@@ -115,12 +115,16 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span className="text-[10px] font-bold text-[#FFD166] uppercase tracking-wider">SEKARANG:</span>
-              <span className="font-extrabold text-white">{currentPeriod.name}</span>
+              <span className="font-extrabold text-white">
+                {currentPeriod.isBreak ? 'ISTIRAHAT' : `${currentPeriod.periodNumber ? `LES ${currentPeriod.periodNumber}: ` : ''}${currentPeriod.subject}`}
+              </span>
             </div>
             {nextPeriod && (
               <div className="flex items-center gap-1.5 pl-2 border-l border-white/20">
                 <span className="text-[10px] font-bold text-[#54D6FF] uppercase tracking-wider">BERIKUTNYA:</span>
-                <span className="font-bold text-gray-200">{nextPeriod.name}</span>
+                <span className="font-bold text-gray-200">
+                  {nextPeriod.isBreak ? 'ISTIRAHAT' : nextPeriod.subject}
+                </span>
               </div>
             )}
           </div>

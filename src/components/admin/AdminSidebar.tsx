@@ -8,26 +8,28 @@ import {
   Settings, 
   Maximize, 
   Radio, 
-  Tv,
-  Film,
-  Image as ImageIcon
+  LogOut
 } from 'lucide-react';
-import { AdminTab } from '../../types';
+import { AdminTab, UserRole } from '../../types';
 
 interface AdminSidebarProps {
   activeTab: AdminTab;
   onSelectTab: (tab: AdminTab) => void;
   onLaunchFullscreen: () => void;
+  onLogout: () => void;
   activeBoardName: string;
   totalSlidesCount: number;
+  userRole: UserRole;
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   activeTab,
   onSelectTab,
   onLaunchFullscreen,
+  onLogout,
   activeBoardName,
-  totalSlidesCount
+  totalSlidesCount,
+  userRole
 }) => {
   const menuItems: { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string }[] = [
     { id: 'beranda', label: 'BERANDA', icon: LayoutDashboard },
@@ -40,7 +42,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
   return (
     <aside className="w-64 bg-[#FFFDF9] border-r-2.5 border-[#18181B] p-4 flex flex-col justify-between flex-shrink-0">
-      <div className="space-y-6">
+      <div className="space-y-6 overflow-y-auto">
         {/* Navigation Menu */}
         <div>
           <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-neutral-400 px-3 mb-2">
@@ -104,15 +106,24 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
             {activeBoardName}
           </div>
           <div className="text-[11px] font-mono text-neutral-600">
-            Kanvas: <strong className="text-[#18181B]">1920 × 1080 PX</strong>
+            Role: <strong className="text-[#18181B] uppercase">{userRole}</strong>
           </div>
         </div>
       </div>
 
       {/* Footer Info */}
-      <div className="pt-4 border-t-2 border-neutral-200 text-[11px] font-mono text-neutral-500 flex items-center justify-between">
-        <span>SIMKA Digital Signage</span>
-        <span className="text-[#0096D6] font-bold">● Online</span>
+      <div className="pt-4 border-t-2 border-neutral-200 space-y-4">
+        <button
+          onClick={onLogout}
+          className="w-full text-left px-3.5 py-2.5 rounded-2xl flex items-center gap-3 transition-all font-display font-bold text-sm text-rose-600 hover:bg-rose-50"
+        >
+          <LogOut className="w-4 h-4 text-rose-500" />
+          <span>KELUAR SISTEM</span>
+        </button>
+        <div className="text-[11px] font-mono text-neutral-500 flex items-center justify-between">
+          <span>SIMKA Digital Signage</span>
+          <span className="text-[#0096D6] font-bold">● Online</span>
+        </div>
       </div>
     </aside>
   );

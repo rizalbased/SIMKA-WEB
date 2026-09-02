@@ -1,4 +1,15 @@
-export type DisplayMode = 'admin' | 'display';
+export type DisplayMode = 'admin' | 'display' | 'login';
+
+export type UserRole = 'admin' | 'user';
+
+export interface AdminProfile {
+  user_id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at?: string;
+}
 
 export type AdminTab = 
   | 'beranda'
@@ -69,6 +80,7 @@ export interface SlideItem {
   transitionDurationMs: number;
   enabled: boolean;
   content: SlideContentPayload;
+  slideMedia?: any[]; // Full media items from DB
 }
 
 export interface BoardItem {

@@ -43,7 +43,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateTab,
   onLaunchFullscreen
 }) => {
-  const activeBoard = boards.find(b => b.id === activeBoardId) || boards.find(b => b.isActive) || boards[0];
+  const activeBoard = boards.find(b => b.id === config.activeBoardId) || boards.find(b => b.isActive) || boards[0];
+  const slides = activeBoard?.slides || [];
+  
   const photoCount = mediaLibrary.filter(m => m.type === 'foto').length;
   const videoCount = mediaLibrary.filter(m => m.type === 'video').length;
   const posterCount = mediaLibrary.filter(m => m.type === 'poster').length;
@@ -106,10 +108,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Radio className="w-4 h-4 text-[#FFD166]" />
           </div>
           <div className="text-2xl font-black font-display text-[#18181B]">
-            {activeBoard?.slides?.length || 0} <span className="text-sm font-bold text-neutral-500">Slide</span>
+            {slides.length} <span className="text-sm font-bold text-neutral-500">Slide</span>
           </div>
           <div className="text-[11px] font-mono text-neutral-600">
-            Durasi: ~{activeBoard?.slides?.reduce((a, b) => a + (b.durationSec || 10), 0) || 0}s
+            Durasi: ~{slides.reduce((a, b) => a + (b.durationSec || 10), 0) || 0}s
           </div>
         </div>
 
@@ -179,7 +181,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Slide Mini-Cards Sequence */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          {activeBoard?.slides?.slice(0, 8).map((slide, index) => (
+          {slides.slice(0, 8).map((slide, index) => (
             <div
               key={slide.id}
               className="bg-white p-3 rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] space-y-2"

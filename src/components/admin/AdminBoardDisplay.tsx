@@ -6,7 +6,8 @@ import {
   TransitionType, 
   DisplayConfig, 
   MediaItem,
-  LessonPeriod
+  LessonPeriod,
+  UserRole
 } from '../../types';
 import { 
   Plus, 
@@ -33,7 +34,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { slideService } from '../../services/slideService';
-import { isSupabaseConfigured } from '../../lib/supabase';
+import { isSupabaseConfigured, supabase, getPublicUrl } from '../../lib/supabase';
 import { LayoutThreePhotos } from '../layouts/LayoutThreePhotos';
 import { LayoutVideoFullscreen } from '../layouts/LayoutVideoFullscreen';
 import { LayoutThreePosters } from '../layouts/LayoutThreePosters';
@@ -54,6 +55,7 @@ interface AdminBoardDisplayProps {
   onUpdateMediaLibrary: (media: MediaItem[] | ((prev: MediaItem[]) => MediaItem[])) => void;
   onSetActiveBoard: (boardId: string) => void;
   onLaunchFullscreen: () => void;
+  userRole?: UserRole;
 }
 
 export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
@@ -65,14 +67,262 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   onUpdateBoards,
   onUpdateMediaLibrary,
   onSetActiveBoard,
-  onLaunchFullscreen
+  onLaunchFullscreen,
+  userRole = 'admin'
 }) => {
+  const isAdmin = userRole === 'admin';
   const [selectedBoardId, setSelectedBoardId] = useState<string>(activeBoardId || boards[0]?.id);
   const currentBoard = boards.find(b => b.id === selectedBoardId) || boards[0];
 
   // Modal states
   const [isAddSlideModalOpen, setIsAddSlideModalOpen] = useState(false);
   const [editingSlide, setEditingSlide] = useState<SlideItem | null>(null);
+  const [isMediaSelectorOpen, setIsMediaSelectorOpen] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+
+  const handleDirectUploadMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingSlide || !isAdmin) return;
+    
+    setIsUploadingMedia(true);
+    try {
+      if (!isSupabaseConfigured()) {
+        alert("Supabase belum dikonfigurasi.");
+        setIsUploadingMedia(false);
+        return;
+      }
+      
+      const fileName = `${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const storagePath = `photos/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('galeri-emka').upload(storagePath, file);
+      if (uploadError) throw uploadError;
+      
+      const { data: mediaData, error: dbError } = await supabase.from('media').insert({
+        title: file.name,
+        file_path: storagePath,
+        file_type: file.type,
+        file_size: file.size,
+        type: file.type.startsWith('video/') ? 'video' : 'foto',
+        category: 'Umum'
+      }).select().single();
+      
+      if (dbError) {
+        await supabase.storage.from('galeri-emka').remove([storagePath]);
+        throw dbError;
+      }
+      
+      const nextPos = (editingSlide.slideMedia || []).length;
+      const { error: smError } = await supabase.from('slide_media').insert({
+        slide_id: editingSlide.id,
+        media_id: mediaData.id,
+        posisi: nextPos
+      });
+      if (smError) throw smError;
+      
+      // Update local state for immediate feedback
+      setEditingSlide({
+        ...editingSlide,
+        slideMedia: [...(editingSlide.slideMedia || []), mediaData]
+      });
+      
+      // Also update media library locally
+      onUpdateMediaLibrary([mediaData, ...mediaLibrary]);
+      
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengunggah foto.');
+    } finally {
+      setIsUploadingMedia(false);
+      e.target.value = ''; // Reset input
+    }
+  };
+
+  const handleRemoveMediaFromSlide = async (mediaId: string) => {
+    if (!editingSlide || !isAdmin) return;
+    
+    try {
+      if (isSupabaseConfigured() && !editingSlide.id.includes('temp-')) {
+        const { error } = await supabase.from('slide_media')
+          .delete()
+          .eq('slide_id', editingSlide.id)
+          .eq('media_id', mediaId);
+          
+        if (error) throw error;
+      }
+      
+      setEditingSlide({
+        ...editingSlide,
+        slideMedia: (editingSlide.slideMedia || []).filter((m: any) => m.id !== mediaId)
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Gagal menghapus media dari slide.');
+    }
+  };
+
+  const handleAddExistingMediaToSlide = async (mediaData: any) => {
+    if (!editingSlide || !isAdmin || activeSlotIndex === null) return;
+    
+    const newSlideMedia = [...(editingSlide.slideMedia || [])];
+    newSlideMedia[activeSlotIndex] = { ...mediaData, posisi: activeSlotIndex };
+    
+    setEditingSlide({
+      ...editingSlide,
+      slideMedia: newSlideMedia
+    });
+    
+    setIsMediaSelectorOpen(false);
+    setActiveSlotIndex(null);
+  };
+
+  const [isUploadingMultiple, setIsUploadingMultiple] = useState(false);
+
+  const handleMultipleUploadForSlide = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !editingSlide || !isAdmin) return;
+    
+    if (files.length > 3) {
+      alert("Maksimal 3 foto untuk template 3 FOTO.");
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploadingMultiple(true);
+    try {
+      if (!isSupabaseConfigured()) {
+        alert("Supabase belum dikonfigurasi.");
+        setIsUploadingMultiple(false);
+        return;
+      }
+
+      const newSlideMedia = [...(editingSlide.slideMedia || [])];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileName = `${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const storagePath = `photos/${fileName}`;
+        
+        // 1. Upload to Storage
+        const { error: uploadError } = await supabase.storage.from('galeri-emka').upload(storagePath, file);
+        if (uploadError) throw uploadError;
+        
+        // 2. Insert into media table
+        const { data: mediaData, error: dbError } = await supabase.from('media').insert({
+          title: file.name,
+          file_path: storagePath,
+          file_type: file.type,
+          file_size: file.size,
+          type: 'foto',
+          category: 'Dokumentasi'
+        }).select().single();
+        
+        if (dbError) {
+          await supabase.storage.from('galeri-emka').remove([storagePath]);
+          throw dbError;
+        }
+
+        // Assign to slot i
+        newSlideMedia[i] = { ...mediaData, posisi: i };
+      }
+
+      setEditingSlide({
+        ...editingSlide,
+        slideMedia: newSlideMedia
+      });
+
+      // Update media library locally
+      const { data: latestMedia } = await supabase.from('media').select('*').order('created_at', { ascending: false });
+      if (latestMedia) {
+        onUpdateMediaLibrary(latestMedia.map(item => ({
+          id: item.id,
+          title: item.title,
+          type: item.type as any,
+          url: getPublicUrl(item.file_path),
+          filePath: item.file_path,
+          category: item.category || 'Lainnya',
+          dimensions: `${item.width || 0} × ${item.height || 0} px`,
+          size: ((item.file_size || 0) / (1024 * 1024)).toFixed(1) + ' MB',
+          orientation: item.orientation as any,
+          dateAdded: item.created_at.split('T')[0]
+        })));
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengunggah beberapa foto.');
+    } finally {
+      setIsUploadingMultiple(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDirectSlotUpload = async (e: React.ChangeEvent<HTMLInputElement>, slotIndex: number) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingSlide || !isAdmin) return;
+    
+    setIsUploadingMedia(true);
+    try {
+      if (!isSupabaseConfigured()) {
+        alert("Supabase belum dikonfigurasi.");
+        return;
+      }
+      
+      const fileName = `${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const isVideo = file.type.startsWith('video/');
+      const storagePath = isVideo ? `videos/${fileName}` : `photos/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('galeri-emka').upload(storagePath, file);
+      if (uploadError) throw uploadError;
+      
+      const { data: mediaData, error: dbError } = await supabase.from('media').insert({
+        title: file.name,
+        file_path: storagePath,
+        file_type: file.type,
+        file_size: file.size,
+        type: isVideo ? 'video' : 'foto',
+        category: isVideo ? 'Video' : 'Dokumentasi'
+      }).select().single();
+      
+      if (dbError) {
+        await supabase.storage.from('galeri-emka').remove([storagePath]);
+        throw dbError;
+      }
+      
+      const newSlideMedia = [...(editingSlide.slideMedia || [])];
+      newSlideMedia[slotIndex] = { ...mediaData, posisi: slotIndex };
+      
+      setEditingSlide({
+        ...editingSlide,
+        slideMedia: newSlideMedia
+      });
+
+      // Update media library locally
+      const { data: latestMedia } = await supabase.from('media').select('*').order('created_at', { ascending: false });
+      if (latestMedia) {
+        onUpdateMediaLibrary(latestMedia.map(item => ({
+          id: item.id,
+          title: item.title,
+          type: item.type as any,
+          url: getPublicUrl(item.file_path),
+          filePath: item.file_path,
+          category: item.category || 'Lainnya',
+          dimensions: `${item.width || 0} × ${item.height || 0} px`,
+          size: ((item.file_size || 0) / (1024 * 1024)).toFixed(1) + ' MB',
+          orientation: item.orientation as any,
+          dateAdded: item.created_at.split('T')[0]
+        })));
+      }
+      
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengunggah file.');
+    } finally {
+      setIsUploadingMedia(false);
+      e.target.value = '';
+    }
+  };
+
   const [slideToDelete, setSlideToDelete] = useState<SlideItem | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
@@ -87,11 +337,13 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
 
   // Handle Board Switch & Updates
   const handleBoardUpdate = async (updatedBoard: BoardItem) => {
+    if (!isAdmin) return;
     const newBoards = boards.map(b => b.id === updatedBoard.id ? updatedBoard : b);
     onUpdateBoards(newBoards);
   };
 
   const handleToggleBoardActive = (boardId: string) => {
+    if (!isAdmin) return;
     const newBoards = boards.map(b => ({
       ...b,
       isActive: b.id === boardId
@@ -101,7 +353,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   };
 
   const handleCreateBoard = () => {
-    if (!newBoardName.trim()) return;
+    if (!isAdmin || !newBoardName.trim()) return;
     const newBoard: BoardItem = {
       id: `board-${Date.now()}`,
       name: newBoardName.trim(),
@@ -135,160 +387,145 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     setNewBoardDesc('');
   };
 
-  // Slide Operations
-  const handleAddSlide = (type: SlideType) => {
-    let newSlide: SlideItem;
-    const slideNumber = currentBoard.slides.length + 1;
+  const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
 
-    switch (type) {
-      case '3_FOTO':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — 3 FOTO POTRAIT`,
-          type: '3_FOTO',
-          durationSec: 10,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            photos: [
-              photoMedia[0]?.url || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[1]?.url || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[2]?.url || 'https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=1000&q=80'
-            ]
-          }
-        };
-        break;
+  const startEditingSlide = (slide: SlideItem) => {
+    const maxSlots = slide.type === '3_FOTO' || slide.type === '3_POSTER' ? 3 : (slide.type === 'FOTO_GRID' ? 4 : 1);
+    const normalizedMedia = Array(maxSlots).fill(null);
+    
+    (slide.slideMedia || []).forEach((m: any, idx: number) => {
+      const pos = typeof m.posisi === 'number' ? m.posisi : idx;
+      if (pos >= 0 && pos < maxSlots) {
+        normalizedMedia[pos] = { ...m, posisi: pos };
+      }
+    });
 
-      case 'VIDEO':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — VIDEO KEGIATAN`,
-          type: 'VIDEO',
-          durationSec: 20,
-          videoPlayMode: 'until_end',
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            videoUrl: videoMedia[0]?.url || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-            videoTitle: 'Video Kegiatan Siswa & MPLS Sekolah'
-          }
-        };
-        break;
-
-      case '3_POSTER':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — 3 POSTER INFORMASI`,
-          type: '3_POSTER',
-          durationSec: 12,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            posters: [
-              posterMedia[0]?.url || 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=800&q=80',
-              posterMedia[1]?.url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80',
-              posterMedia[2]?.url || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80'
-            ]
-          }
-        };
-        break;
-
-      case '1_POSTER':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — POSTER RESMI`,
-          type: '1_POSTER',
-          durationSec: 10,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            posterUrl: posterMedia[0]?.url || 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=1200&q=80',
-            posterTitle: 'Pengumuman Resmi Sekolah'
-          }
-        };
-        break;
-
-      case 'FOTO_GRID':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — GRID 4 FOTO`,
-          type: 'FOTO_GRID',
-          durationSec: 10,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            gridPhotos: [
-              photoMedia[0]?.url || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[1]?.url || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[2]?.url || 'https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=1000&q=80',
-              photoMedia[3]?.url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1000&q=80'
-            ]
-          }
-        };
-        break;
-
-      case 'FOTO_INFORMASI':
-        newSlide = {
-          id: `sld-${Date.now()}`,
-          title: `SLIDE ${slideNumber} — FOTO + INFORMASI`,
-          type: 'FOTO_INFORMASI',
-          durationSec: 12,
-          transition: 'fade',
-          transitionDurationMs: 800,
-          enabled: true,
-          content: {
-            splitPhotoUrl: photoMedia[0]?.url || 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80',
-            infoTitle: 'Jadwal Les & Bimbingan Belajar',
-            infoDetails: 'Informasi rotasi kelas dan status jam pembelajaran real-time.'
-          }
-        };
-        break;
-    }
-
-    const updatedBoard = {
-      ...currentBoard,
-      slides: [...currentBoard.slides, newSlide]
-    };
-    handleBoardUpdate(updatedBoard);
-    setIsAddSlideModalOpen(false);
-  };
-
-  const handleDuplicateSlide = (slide: SlideItem) => {
-    const index = currentBoard.slides.findIndex(s => s.id === slide.id);
-    const clonedSlide: SlideItem = {
+    setEditingSlide({
       ...slide,
-      id: `sld-${Date.now()}`,
-      title: `${slide.title} (SALINAN)`,
-      content: JSON.parse(JSON.stringify(slide.content))
-    };
-
-    const newSlides = [...currentBoard.slides];
-    newSlides.splice(index + 1, 0, clonedSlide);
-
-    const updatedBoard = {
-      ...currentBoard,
-      slides: newSlides
-    };
-    handleBoardUpdate(updatedBoard);
+      slideMedia: normalizedMedia
+    });
   };
 
-  const handleConfirmDeleteSlide = () => {
-    if (!slideToDelete) return;
-    const newSlides = currentBoard.slides.filter(s => s.id !== slideToDelete.id);
-    const updatedBoard = {
-      ...currentBoard,
-      slides: newSlides
+  // Slide Operations
+  const handleAddSlide = async (type: SlideType) => {
+    if (!isAdmin) return;
+    const slideNumber = currentBoard.slides.length + 1;
+    let title = `SLIDE ${slideNumber} — ${type}`;
+    
+    const newSlide: SlideItem = {
+      id: `temp-${Date.now()}`,
+      title,
+      type,
+      durationSec: 10,
+      transition: 'fade',
+      transitionDurationMs: 800,
+      enabled: true,
+      content: {}
     };
-    handleBoardUpdate(updatedBoard);
-    setSlideToDelete(null);
+
+    try {
+      if (isSupabaseConfigured()) {
+        const savedSlideData = await slideService.saveSlide(currentBoard.id, newSlide, []);
+        const actualSlide = { ...newSlide, id: savedSlideData.id, slideMedia: [] };
+        const updatedBoard = {
+          ...currentBoard,
+          slides: [...currentBoard.slides, actualSlide]
+        };
+        handleBoardUpdate(updatedBoard);
+        setIsAddSlideModalOpen(false);
+        startEditingSlide(actualSlide);
+      } else {
+        const updatedBoard = {
+          ...currentBoard,
+          slides: [...currentBoard.slides, newSlide]
+        };
+        handleBoardUpdate(updatedBoard);
+        setIsAddSlideModalOpen(false);
+        startEditingSlide(newSlide);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Gagal membuat slide.');
+    }
+  };
+
+  const handleDuplicateSlide = async (slide: SlideItem) => {
+    if (!isAdmin) return;
+    try {
+      if (isSupabaseConfigured() && !slide.id.includes('temp-')) {
+        const clonedSlideData = {
+          ...slide,
+          id: `temp-${Date.now()}`, // Temporary ID for saveSlide to insert as a new record
+          title: `${slide.title} (SALINAN)`,
+          content: JSON.parse(JSON.stringify(slide.content))
+        };
+        const mediaWithPositions = (slide.slideMedia || []).map((m: any, index: number) => {
+          if (!m) return null;
+          return {
+            id: m.id,
+            posisi: typeof m.posisi === 'number' ? m.posisi : index
+          };
+        }).filter(Boolean);
+
+        await slideService.saveSlide(currentBoard.id, clonedSlideData, mediaWithPositions);
+        const dbBoards = await slideService.getBoards();
+        onUpdateBoards(dbBoards);
+      } else {
+        const index = currentBoard.slides.findIndex(s => s.id === slide.id);
+        const clonedSlide: SlideItem = {
+          ...slide,
+          id: `sld-${Date.now()}`,
+          title: `${slide.title} (SALINAN)`,
+          content: JSON.parse(JSON.stringify(slide.content))
+        };
+
+        const newSlides = [...currentBoard.slides];
+        newSlides.splice(index + 1, 0, clonedSlide);
+
+        const updatedBoard = {
+          ...currentBoard,
+          slides: newSlides
+        };
+        handleBoardUpdate(updatedBoard);
+      }
+    } catch (err) {
+      console.error('SIMKA DUPLICATE SLIDE ERROR:', err);
+      alert('Gagal menduplikasi slide ke Supabase.');
+    }
+  };
+
+  const handleConfirmDeleteSlide = async () => {
+    if (!isAdmin || !slideToDelete) return;
+    try {
+      if (isSupabaseConfigured() && !slideToDelete.id.includes('temp-')) {
+        await slideService.deleteSlide(slideToDelete.id);
+        const dbBoards = await slideService.getBoards();
+        onUpdateBoards(dbBoards);
+        
+        // Audit after delete
+        const { data: slidesLeft, error: fetchErr } = await supabase
+          .from('slides')
+          .select('*');
+        if (!fetchErr) {
+          console.log('SLIDES AFTER DELETE:', slidesLeft);
+        }
+      } else {
+        const newSlides = currentBoard.slides.filter(s => s.id !== slideToDelete.id);
+        const updatedBoard = {
+          ...currentBoard,
+          slides: newSlides
+        };
+        handleBoardUpdate(updatedBoard);
+      }
+      setSlideToDelete(null);
+    } catch (err) {
+      console.error('SIMKA DELETE SLIDE ERROR:', err);
+      alert('Slide gagal dihapus dari Supabase.');
+    }
   };
 
   const handleMoveSlide = (index: number, direction: 'up' | 'down') => {
+    if (!isAdmin) return;
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= currentBoard.slides.length) return;
 
@@ -305,26 +542,53 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   };
 
   const handleSaveEditedSlide = async (updatedSlide: SlideItem) => {
-    // Sync to Supabase
-    const mediaIds: string[] = [];
-    const content = updatedSlide.content;
-    const findMediaId = (url: string) => mediaLibrary.find(m => m.url === url)?.id;
+    if (!isAdmin) return;
+    
+    // Construct the media ids with their actual slot positions
+    const mediaWithPositions = (updatedSlide.slideMedia || [])
+      .map((m: any, index: number) => {
+        if (!m) return null;
+        return {
+          id: m.id,
+          posisi: index
+        };
+      })
+      .filter(Boolean);
 
-    if (content.photos) content.photos.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
-    if (content.videoUrl) { const id = findMediaId(content.videoUrl); if (id) mediaIds.push(id); }
-    if (content.posterUrl) { const id = findMediaId(content.posterUrl); if (id) mediaIds.push(id); }
-    if (content.posters) content.posters.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
-    if (content.gridPhotos) content.gridPhotos.forEach(url => { if (url) { const id = findMediaId(url); if (id) mediaIds.push(id); } });
-    if (content.splitPhotoUrl) { const id = findMediaId(content.splitPhotoUrl); if (id) mediaIds.push(id); }
+    // Compute layout URLs inside content so that it renders instantly and accurately
+    const content = { ...updatedSlide.content };
+    const mappedUrls = (updatedSlide.slideMedia || []).map((m: any) => m ? getPublicUrl(m.file_path || m.url) : '');
+
+    if (updatedSlide.type === '3_FOTO') {
+      content.photos = [mappedUrls[0] || '', mappedUrls[1] || '', mappedUrls[2] || ''];
+    } else if (updatedSlide.type === 'FOTO_GRID') {
+      content.gridPhotos = [mappedUrls[0] || '', mappedUrls[1] || '', mappedUrls[2] || '', mappedUrls[3] || ''];
+    } else if (updatedSlide.type === '1_POSTER') {
+      content.posterUrl = mappedUrls[0] || '';
+    } else if (updatedSlide.type === '3_POSTER') {
+      content.posters = [mappedUrls[0] || '', mappedUrls[1] || '', mappedUrls[2] || ''];
+    } else if (updatedSlide.type === 'FOTO_INFORMASI') {
+      content.splitPhotoUrl = mappedUrls[0] || '';
+    } else if (updatedSlide.type === 'VIDEO') {
+      content.videoUrl = mappedUrls[0] || '';
+      const activeVideo = (updatedSlide.slideMedia || []).find((m: any) => m !== null);
+      content.videoTitle = activeVideo ? activeVideo.title : '';
+    }
+
+    const finalizedSlide: SlideItem = {
+      ...updatedSlide,
+      content,
+      // Keep only non-null elements in slideMedia for local states
+      slideMedia: (updatedSlide.slideMedia || []).filter(Boolean).map((m: any, idx: number) => ({ ...m, posisi: idx }))
+    };
 
     try {
       if (isSupabaseConfigured()) {
-        await slideService.saveSlide(currentBoard.id, updatedSlide, mediaIds);
-      } else {
-        console.warn('Supabase not configured. Saving locally only.');
+        const savedData = await slideService.saveSlide(currentBoard.id, finalizedSlide, mediaWithPositions);
+        finalizedSlide.id = savedData.id;
       }
       
-      const newSlides = currentBoard.slides.map(s => s.id === updatedSlide.id ? updatedSlide : s);
+      const newSlides = currentBoard.slides.map(s => s.id === finalizedSlide.id || (s.id.includes('temp-') && s.id === finalizedSlide.id) ? finalizedSlide : s);
       const updatedBoard = {
         ...currentBoard,
         slides: newSlides
@@ -474,13 +738,15 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                 );
               })}
 
-              <button
-                onClick={() => setIsNewBoardModalOpen(true)}
-                className="px-3 py-2 rounded-xl font-display font-bold text-xs bg-white hover:bg-neutral-100 text-[#0096D6] border-2 border-dashed border-[#0096D6] flex items-center gap-1.5 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ TAMBAH BOARD</span>
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setIsNewBoardModalOpen(true)}
+                  className="px-3 py-2 rounded-xl font-display font-bold text-xs bg-white hover:bg-neutral-100 text-[#0096D6] border-2 border-dashed border-[#0096D6] flex items-center gap-1.5 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ TAMBAH BOARD</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -489,12 +755,13 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-bold text-neutral-700">STATUS:</span>
               <button
+                disabled={!isAdmin}
                 onClick={() => handleToggleBoardActive(currentBoard.id)}
                 className={`px-3 py-1 rounded-lg text-xs font-mono font-black flex items-center gap-1.5 transition-colors ${
                   currentBoard.isActive
                     ? 'bg-emerald-500 text-white'
                     : 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300'
-                }`}
+                } ${!isAdmin ? 'cursor-not-allowed opacity-90' : ''}`}
               >
                 <span className={`w-2 h-2 rounded-full ${currentBoard.isActive ? 'bg-white animate-pulse' : 'bg-neutral-400'}`}></span>
                 <span>{currentBoard.isActive ? '● AKTIF (SIARAN)' : '○ NONAKTIF'}</span>
@@ -506,6 +773,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-bold text-neutral-700">MODE PUTAR:</span>
               <select
+                disabled={!isAdmin}
                 value={currentBoard.loopMode}
                 onChange={(e) => {
                   handleBoardUpdate({
@@ -513,7 +781,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                     loopMode: e.target.value as any
                   });
                 }}
-                className="bg-[#F3EFE6] px-2 py-1 rounded-lg font-mono font-bold text-xs text-[#18181B] border border-[#18181B] focus:outline-none"
+                className={`bg-[#F3EFE6] px-2 py-1 rounded-lg font-mono font-bold text-xs text-[#18181B] border border-[#18181B] focus:outline-none ${!isAdmin ? 'cursor-not-allowed' : ''}`}
               >
                 <option value="loop_forever">Ulangi Terus (Loop)</option>
                 <option value="play_once">Urut dari Awal</option>
@@ -541,14 +809,20 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
             <span>DAFTAR URUTAN SLIDE PADA BOARD</span>
           </div>
 
-          <button
-            id="btn-tambah-slide"
-            onClick={() => setIsAddSlideModalOpen(true)}
-            className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-4 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
-          >
-            <Plus className="w-4 h-4 text-[#FFD166]" />
-            <span>+ TAMBAH SLIDE</span>
-          </button>
+          {isAdmin ? (
+            <button
+              id="btn-tambah-slide"
+              onClick={() => setIsAddSlideModalOpen(true)}
+              className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-4 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+            >
+              <Plus className="w-4 h-4 text-[#18181B]" />
+              <span>+ TAMBAH SLIDE</span>
+            </button>
+          ) : (
+            <div className="px-3.5 py-1.5 bg-neutral-100 border border-neutral-300 rounded-lg text-neutral-600 text-xs font-mono font-bold">
+              MODE BACA (READ-ONLY)
+            </div>
+          )}
         </div>
 
         {/* Slide List (Drag/Reorder, Duplicate, Edit, Delete) */}
@@ -566,7 +840,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                   <div className="flex flex-col items-center gap-1 bg-[#F8F6F0] p-1.5 rounded-lg border border-[#18181B]">
                     <button
                       onClick={() => handleMoveSlide(index, 'up')}
-                      disabled={index === 0}
+                      disabled={!isAdmin || index === 0}
                       className="p-1 text-neutral-700 hover:text-black disabled:opacity-20 transition-colors"
                       title="Pindahkan ke atas"
                     >
@@ -577,7 +851,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                     </span>
                     <button
                       onClick={() => handleMoveSlide(index, 'down')}
-                      disabled={index === currentBoard.slides.length - 1}
+                      disabled={!isAdmin || index === currentBoard.slides.length - 1}
                       className="p-1 text-neutral-700 hover:text-black disabled:opacity-20 transition-colors"
                       title="Pindahkan ke bawah"
                     >
@@ -616,33 +890,67 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
 
                 {/* Right Action Buttons */}
                 <div className="flex items-center gap-2 self-end md:self-center">
-                  <button
-                    onClick={() => setEditingSlide(slide)}
-                    className="px-3 py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] font-display font-bold text-xs rounded-lg border-2 border-[#18181B] shadow-[1.5px_1.5px_0px_#18181B] flex items-center gap-1.5 transition-all"
-                  >
-                    <Edit3 className="w-3.5 h-3.5 text-[#0096D6]" />
-                    <span>Edit</span>
-                  </button>
+                  {isAdmin ? (
+                    <>
+                      <button
+                        onClick={() => startEditingSlide(slide)}
+                        className="px-3 py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] font-display font-bold text-xs rounded-lg border-2 border-[#18181B] shadow-[1.5px_1.5px_0px_#18181B] flex items-center gap-1.5 transition-all"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-[#0096D6]" />
+                        <span>Edit</span>
+                      </button>
 
-                  <button
-                    onClick={() => handleDuplicateSlide(slide)}
-                    className="px-3 py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] font-display font-bold text-xs rounded-lg border-2 border-[#18181B] shadow-[1.5px_1.5px_0px_#18181B] flex items-center gap-1.5 transition-all"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-neutral-700" />
-                    <span>Duplikat</span>
-                  </button>
+                      <button
+                        onClick={() => handleDuplicateSlide(slide)}
+                        className="px-3 py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] font-display font-bold text-xs rounded-lg border-2 border-[#18181B] shadow-[1.5px_1.5px_0px_#18181B] flex items-center gap-1.5 transition-all"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-neutral-700" />
+                        <span>Duplikat</span>
+                      </button>
 
-                  <button
-                    onClick={() => setSlideToDelete(slide)}
-                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-display font-bold text-xs rounded-lg border-2 border-rose-400 flex items-center gap-1.5 transition-all"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Hapus</span>
-                  </button>
+                      <button
+                        onClick={() => setSlideToDelete(slide)}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-display font-bold text-xs rounded-lg border-2 border-rose-400 flex items-center gap-1.5 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setPreviewSlideIndex(index);
+                        setIsPreviewModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] font-display font-bold text-xs rounded-lg border-2 border-[#18181B] shadow-[1.5px_1.5px_0px_#18181B] flex items-center gap-1.5 transition-all"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-[#0096D6]" />
+                      <span>Lihat Pratinjau</span>
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
+          
+          {currentBoard.slides.length === 0 && (
+            <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border-2 border-dashed border-neutral-300 text-center space-y-4">
+              <Layers className="w-12 h-12 text-neutral-400" />
+              <div>
+                <p className="text-base font-black font-display text-[#18181B]">Belum ada slide pada board ini.</p>
+                <p className="text-xs text-neutral-500 max-w-sm mt-1">Tambahkan slide baru dengan berbagai pilihan layout seperti 3 Foto, Video, Poster, atau Foto Informasi.</p>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => setIsAddSlideModalOpen(true)}
+                  className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-bold text-xs px-4 py-2 rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] flex items-center gap-2 transition-all"
+                >
+                  <Plus className="w-4 h-4 text-[#18181B]" />
+                  <span>+ TAMBAH SLIDE</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -813,203 +1121,145 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
               </div>
 
               {/* Specific Content Inputs based on Slide Type */}
-              {editingSlide.type === '3_FOTO' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PILIH 3 FOTO POTRAIT
+              <div className="space-y-4 bg-white p-5 rounded-xl border-2 border-[#18181B]">
+                <div className="flex items-center justify-between border-b-2 border-neutral-100 pb-2">
+                  <h4 className="font-display font-black text-sm text-[#18181B] flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 bg-[#0096D6] rounded-full"></span>
+                    <span>MEDIA SLIDE</span>
                   </h4>
-                  {[0, 1, 2].map((slotIdx) => (
-                    <MediaPicker
-                      key={slotIdx}
-                      label={`FOTO ${slotIdx + 1}`}
-                      type="foto"
-                      value={editingSlide.content.photos?.[slotIdx] || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        const newPhotos = [...(editingSlide.content.photos || ['', '', ''])] as [string, string, string];
-                        newPhotos[slotIdx] = url;
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, photos: newPhotos }
-                        });
-                      }}
-                      expectedRatio="2/3"
-                      boards={boards}
-                    />
-                  ))}
+                  <span className="text-[10px] font-mono font-bold bg-[#0096D6]/10 text-[#0096D6] px-2 py-0.5 rounded border border-[#0096D6]/30">
+                    Sistem Slot Terstruktur
+                  </span>
                 </div>
-              )}
 
-              {editingSlide.type === 'VIDEO' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PENGATURAN VIDEO FULLSCREEN
-                  </h4>
-                  <div>
-                    <MediaPicker
-                      label="PILIH VIDEO"
-                      type="video"
-                      value={editingSlide.content.videoUrl || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, videoUrl: url }
-                        });
-                      }}
-                      boards={boards}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
-                      JUDUL VIDEO
-                    </label>
-                    <input
-                      type="text"
-                      value={editingSlide.content.videoTitle || ''}
-                      onChange={(e) => {
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, videoTitle: e.target.value }
-                        });
-                      }}
-                      className="w-full bg-[#F8F6F0] p-2 rounded-lg border border-[#18181B] text-xs font-bold text-[#18181B]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
-                      MODE PUTAR VIDEO
-                    </label>
-                    <div className="flex items-center gap-4">
-                      <label className="flex items-center gap-1.5 text-xs font-bold cursor-pointer">
-                        <input
-                          type="radio"
-                          name="videoMode"
-                          checked={editingSlide.videoPlayMode === 'until_end'}
-                          onChange={() => setEditingSlide({ ...editingSlide, videoPlayMode: 'until_end' })}
-                        />
-                        <span>Putar sampai selesai</span>
-                      </label>
-                      <label className="flex items-center gap-1.5 text-xs font-bold cursor-pointer">
-                        <input
-                          type="radio"
-                          name="videoMode"
-                          checked={editingSlide.videoPlayMode === 'duration'}
-                          onChange={() => setEditingSlide({ ...editingSlide, videoPlayMode: 'duration' })}
-                        />
-                        <span>Durasi tertentu</span>
-                      </label>
+                {/* Bulk Multi-Upload for 3 FOTO Template */}
+                {editingSlide.type === '3_FOTO' && (
+                  <div className="p-4 bg-[#F0F9FF] border border-sky-200 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div>
+                      <h5 className="text-xs font-bold text-sky-800 font-display">UNGGAH 3 FOTO SEKALIGUS</h5>
+                      <p className="text-[10px] text-sky-600 font-mono mt-0.5">Pilih maksimal 3 file gambar untuk mengisi slot 1, 2, dan 3 secara otomatis.</p>
                     </div>
+                    <label className="shrink-0 px-4 py-2 bg-[#0096D6] hover:bg-[#0080B8] text-white border-2 border-[#18181B] rounded-xl text-xs font-bold shadow-[2px_2px_0px_#18181B] active:translate-y-[1px] active:shadow-[1px_1px_0px_#18181B] cursor-pointer flex items-center gap-1.5 transition-all">
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        multiple 
+                        accept="image/jpeg,image/png,image/webp" 
+                        onChange={handleMultipleUploadForSlide} 
+                      />
+                      <span>+ PILIH FILE (MAKS 3)</span>
+                    </label>
                   </div>
-                </div>
-              )}
+                )}
 
-              {editingSlide.type === '3_POSTER' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PILIH 3 POSTER
-                  </h4>
-                  {[0, 1, 2].map((slotIdx) => (
-                    <MediaPicker
-                      key={slotIdx}
-                      label={`POSTER ${slotIdx + 1}`}
-                      type="poster"
-                      value={editingSlide.content.posters?.[slotIdx] || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        const newPosters = [...(editingSlide.content.posters || ['', '', ''])] as [string, string, string];
-                        newPosters[slotIdx] = url;
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, posters: newPosters }
-                        });
-                      }}
-                      expectedRatio="2/3"
-                      boards={boards}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {editingSlide.type === '1_POSTER' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PENGATURAN POSTER TUNGGAL
-                  </h4>
-                  <div>
-                    <MediaPicker
-                      label="PILIH POSTER"
-                      type="poster"
-                      value={editingSlide.content.posterUrl || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, posterUrl: url }
-                        });
-                      }}
-                      boards={boards}
-                    />
+                {isUploadingMultiple && (
+                  <div className="py-2 text-center text-xs font-mono font-bold text-[#0096D6] animate-pulse">
+                    Mengunggah beberapa foto sekaligus...
                   </div>
-                </div>
-              )}
+                )}
 
-              {editingSlide.type === 'FOTO_GRID' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PILIH 4 FOTO GRID (2 × 2)
-                  </h4>
-                  {[0, 1, 2, 3].map((slotIdx) => (
-                    <MediaPicker
-                      key={slotIdx}
-                      label={`FOTO ${slotIdx + 1}`}
-                      type="foto"
-                      value={editingSlide.content.gridPhotos?.[slotIdx] || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        const newGrid = [...(editingSlide.content.gridPhotos || ['', '', '', ''])] as [string, string, string, string];
-                        newGrid[slotIdx] = url;
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, gridPhotos: newGrid }
-                        });
-                      }}
-                      boards={boards}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {editingSlide.type === 'FOTO_INFORMASI' && (
-                <div className="space-y-3 bg-white p-4 rounded-xl border-2 border-[#18181B]">
-                  <h4 className="font-display font-black text-sm text-[#18181B]">
-                    PENGATURAN FOTO + INFORMASI JADWAL
-                  </h4>
-                  <div>
-                    <MediaPicker
-                      label="FOTO UTAMA (70%)"
-                      type="foto"
-                      value={editingSlide.content.splitPhotoUrl || ''}
-                      mediaLibrary={mediaLibrary}
-                      onUpdateMediaLibrary={onUpdateMediaLibrary}
-                      onChange={(url) => {
-                        setEditingSlide({
-                          ...editingSlide,
-                          content: { ...editingSlide.content, splitPhotoUrl: url }
-                        });
-                      }}
-                      boards={boards}
-                    />
+                {isUploadingMedia && (
+                  <div className="py-2 text-center text-xs font-mono font-bold text-[#0096D6] animate-pulse">
+                    Sedang mengunggah media ke slot...
                   </div>
+                )}
+
+                {/* Grid of Slots */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {(() => {
+                    const maxSlots = editingSlide.type === '3_FOTO' || editingSlide.type === '3_POSTER' ? 3 : (editingSlide.type === 'FOTO_GRID' ? 4 : 1);
+                    const slots = Array.from({ length: maxSlots });
+                    
+                    return slots.map((_, idx) => {
+                      const mediaItem = (editingSlide.slideMedia || [])[idx];
+                      
+                      if (mediaItem) {
+                        return (
+                          <div key={idx} className="border-2 border-[#18181B] rounded-xl overflow-hidden bg-[#F8F6F0] shadow-[3px_3px_0px_#18181B] flex flex-col justify-between">
+                            <div className="bg-neutral-900 aspect-video relative flex items-center justify-center overflow-hidden border-b-2 border-[#18181B]">
+                              {mediaItem.file_type?.startsWith('video/') || mediaItem.type === 'video' ? (
+                                <video src={getPublicUrl(mediaItem.file_path || mediaItem.url)} className="w-full h-full object-cover" />
+                              ) : (
+                                <img src={getPublicUrl(mediaItem.file_path || mediaItem.url)} alt={`Slot ${idx + 1}`} className="w-full h-full object-cover" />
+                              )}
+                              <div className="absolute top-2 left-2 bg-black/75 text-white font-mono font-black text-[9px] px-2 py-0.5 rounded border border-white/25">
+                                SLOT {idx + 1}
+                              </div>
+                            </div>
+                            
+                            <div className="p-3 bg-white space-y-2">
+                              <div className="text-xs font-bold text-[#18181B] truncate" title={mediaItem.title}>
+                                {mediaItem.title}
+                              </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveSlotIndex(idx);
+                                    setIsMediaSelectorOpen(true);
+                                  }}
+                                  className="flex-1 text-[10px] font-bold py-1 bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 rounded text-neutral-700 transition-colors"
+                                >
+                                  Ganti
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newMedia = [...(editingSlide.slideMedia || [])];
+                                    newMedia[idx] = null;
+                                    setEditingSlide({ ...editingSlide, slideMedia: newMedia });
+                                  }}
+                                  className="flex-1 text-[10px] font-bold py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded text-rose-600 transition-colors"
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div 
+                            key={idx} 
+                            className="border-2 border-dashed border-neutral-300 rounded-xl bg-neutral-50/50 p-4 flex flex-col items-center justify-center text-center space-y-3 min-h-[160px] relative transition-colors hover:bg-neutral-50"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center text-xs font-mono font-black text-neutral-500">
+                              {idx + 1}
+                            </div>
+                            
+                            <div className="space-y-0.5">
+                              <h5 className="text-xs font-bold text-[#18181B]">SLOT {idx + 1} KOSONG</h5>
+                              <p className="text-[9px] text-neutral-400 font-mono">Belum ada foto/video terpilih</p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 w-full">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveSlotIndex(idx);
+                                  setIsMediaSelectorOpen(true);
+                                }}
+                                className="flex-1 text-[10px] font-bold py-1.5 bg-[#FFFDF9] hover:bg-[#F3EFE6] text-[#18181B] border border-[#18181B] rounded shadow-[1.5px_1.5px_0px_#18181B] active:translate-y-[0.5px] active:shadow-[1px_1px_0px_#18181B] transition-all"
+                              >
+                                + Galeri
+                              </button>
+                              <label className="flex-1 text-[10px] font-bold py-1.5 bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] border border-[#18181B] rounded shadow-[1.5px_1.5px_0px_#18181B] active:translate-y-[0.5px] active:shadow-[1px_1px_0px_#18181B] cursor-pointer text-center transition-all">
+                                <input 
+                                  type="file" 
+                                  className="hidden" 
+                                  accept={editingSlide.type === 'VIDEO' ? 'video/*' : 'image/*'} 
+                                  onChange={(e) => handleDirectSlotUpload(e, idx)} 
+                                />
+                                <span>+ Upload</span>
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      }
+                    });
+                  })()}
                 </div>
-              )}
+              </div>
 
               {/* Durasi Tampil */}
               <div>
@@ -1329,6 +1579,53 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           </div>
         </div>
       )}
-    </div>
+    
+      {/* =========================================================================
+          MODAL: MEDIA SELECTOR
+         ========================================================================= */}
+      {isMediaSelectorOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#FFFDF9] rounded-2xl border-3 border-[#18181B] shadow-[6px_6px_0px_#18181B] w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b-2 border-neutral-200 shrink-0">
+              <h3 className="text-xl font-black font-display text-[#18181B] uppercase">
+                PILIH MEDIA DARI GALERI
+              </h3>
+              <button 
+                onClick={() => setIsMediaSelectorOpen(false)}
+                className="p-1 rounded-lg hover:bg-neutral-200 text-neutral-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {mediaLibrary.map(media => (
+                <div 
+                  key={media.id}
+                  onClick={() => handleAddExistingMediaToSlide(media)}
+                  className="group aspect-square rounded-2xl border-2 border-[#18181B] bg-neutral-900 overflow-hidden relative cursor-pointer hover:shadow-[4px_4px_0px_#0096D6] transition-all hover:translate-y-[-2px] flex items-center justify-center p-2"
+                >
+                  {media.type === 'video' || (media as any).file_type?.startsWith('video/') ? (
+                    <video src={getPublicUrl((media as any).file_path || media.url)} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  ) : (
+                    <img src={getPublicUrl((media as any).file_path || media.url)} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  )}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-white font-bold text-xs bg-[#0096D6] px-3 py-1.5 rounded-lg border border-[#18181B]">
+                      PILIH
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {mediaLibrary.length === 0 && (
+                <div className="col-span-full py-12 flex items-center justify-center text-neutral-400 font-mono text-xs">
+                  Tidak ada media di galeri.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+</div>
   );
 };

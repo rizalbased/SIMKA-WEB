@@ -183,23 +183,37 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     
     if (isDeleting) return;
 
-    if (isMediaInUse(media.id, media.url)) {
-      alert(`Media "${media.title}" sedang digunakan pada slide. Ganti medianya terlebih dahulu.`);
-      return;
-    }
-
     if (!window.confirm(`Hapus "${media.title}" dari galeri secara permanen?`)) return;
 
     setIsDeleting(media.id);
     try {
-      if (media.filePath) {
-        await mediaService.deleteMedia(media.id, media.filePath);
+      if (media.type === 'video') {
+        await videoService.deleteVideo(media.id, media.filePath || '');
       } else {
-        // Fallback for non-Supabase items (legacy)
-        onUpdateMediaLibrary(prev => prev.filter(m => m.id !== media.id));
+        await mediaService.deleteMedia(media.id, media.filePath || '');
       }
 
-      onUpdateMediaLibrary(prev => prev.filter(m => m.id !== media.id));
+      // Reload public.media
+      const [photos, videos] = await Promise.all([
+        mediaService.getAllMedia(),
+        videoService.getAllVideos()
+      ]);
+      
+      const combinedMedia: MediaItem[] = [
+        ...photos,
+        ...videos.map((v: any) => ({
+          id: v.id,
+          title: v.title,
+          type: 'video' as const,
+          url: v.url,
+          filePath: v.file_path,
+          category: 'Video',
+          dimensions: `${v.width} × ${v.height}`,
+          size: (v.file_size / (1024 * 1024)).toFixed(1) + ' MB',
+          dateAdded: v.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]
+        }))
+      ];
+      onUpdateMediaLibrary(combinedMedia);
 
       if (value === media.url) {
         onChange('');

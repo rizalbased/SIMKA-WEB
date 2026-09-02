@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { MediaItem, BoardItem } from '../../types';
-import { mediaDb } from '../../lib/mediaDb';
+import React, { useState, useRef, useEffect } from 'react';
+import { MediaItem, BoardItem, UserRole } from '../../types';
+import { mediaService } from '../../services/mediaService';
+import { videoService } from '../../services/videoService';
+import { supabase } from '../../lib/supabase';
 import { 
   FolderKanban, 
   Plus, 
@@ -10,32 +12,103 @@ import {
   FileText, 
   Search, 
   X, 
-  Check, 
   UploadCloud,
-  Eye
+  Eye,
+  Loader2,
+  Lock,
+  ImagePlus
 } from 'lucide-react';
 
 interface AdminMediaLibraryProps {
   mediaLibrary: MediaItem[];
   onUpdateMediaLibrary: (items: MediaItem[] | ((prev: MediaItem[]) => MediaItem[])) => void;
   boards?: BoardItem[];
+  userRole?: UserRole;
 }
 
 export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
   mediaLibrary,
   onUpdateMediaLibrary,
-  boards = []
+  boards = [],
+  userRole = 'admin'
 }) => {
+  const isAdmin = userRole === 'admin';
   const [activeFilter, setActiveFilter] = useState<'all' | 'foto' | 'video' | 'poster'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState<'foto' | 'video' | 'poster'>('foto');
-  const [newUrl, setNewUrl] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null);
 
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load media from Supabase on mount & set up realtime listener
+  useEffect(() => {
+    const loadMedia = async () => {
+      try {
+        const [photos, videos] = await Promise.all([
+          mediaService.getAllMedia(),
+          videoService.getAllVideos()
+        ]);
+
+        const combinedMedia: MediaItem[] = [
+          ...photos,
+          ...videos.map((v: any) => ({
+            id: v.id,
+            title: v.title,
+            type: 'video' as const,
+            url: v.url,
+            filePath: v.file_path,
+            category: 'Video',
+            dimensions: `${v.width} × ${v.height}`,
+            size: (v.file_size / (1024 * 1024)).toFixed(1) + ' MB',
+            dateAdded: v.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]
+          }))
+        ];
+
+        onUpdateMediaLibrary(combinedMedia);
+      } catch (error) {
+        console.error('SIMKA LOAD MEDIA ERROR:', error);
+      }
+    };
+
+    loadMedia();
+
+    const channel = supabase
+      .channel('simka-media-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'media'
+        },
+        async () => {
+          await loadMedia();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'videos'
+        },
+        async () => {
+          await loadMedia();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const filteredMedia = mediaLibrary.filter(item => {
     const matchesFilter = activeFilter === 'all' || item.type === activeFilter;
@@ -44,77 +117,200 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
     return matchesFilter && matchesSearch;
   });
 
-  const handleAddMedia = () => {
-    if (!newTitle.trim() || !newUrl.trim()) return;
-
-    const newItem: MediaItem = {
-      id: `med-${Date.now()}`,
-      title: newTitle.trim(),
-      type: newType,
-      url: newUrl.trim(),
-      category: newCategory.trim() || (newType === 'foto' ? 'Dokumentasi' : newType === 'video' ? 'Kegiatan' : 'Pengumuman'),
-      dimensions: newType === 'foto' ? '1000 × 1500 (Portrait)' : newType === 'video' ? '1920 × 1080 Full HD' : '1080 × 1920 (Poster)',
-      dateAdded: '28 Agu 2026'
-    };
-
-    onUpdateMediaLibrary([newItem, ...mediaLibrary]);
-    setIsAddModalOpen(false);
-    setNewTitle('');
-    setNewUrl('');
-    setNewCategory('');
-  };
-
-  const isMediaInUse = (mediaId: string, mediaUrl: string) => {
-    return boards.some(board => 
-      board.slides.some(slide => {
-        const content = slide.content;
-        if (!content) return false;
-        if (content.photos?.includes(mediaUrl)) return true;
-        if (content.videoUrl === mediaUrl) return true;
-        if (content.posterUrl === mediaUrl) return true;
-        if (content.posters?.includes(mediaUrl)) return true;
-        if (content.gridPhotos?.includes(mediaUrl)) return true;
-        if (content.splitPhotoUrl === mediaUrl) return true;
-        return false;
-      })
-    );
-  };
-
-  const handleDeleteMedia = async (id: string) => {
-    if (isDeleting) return;
-
-    const item = mediaLibrary.find(m => m.id === id);
-    if (!item) return;
-
-    if (isMediaInUse(id, item.url)) {
-      alert(`Media "${item.title}" sedang digunakan pada board. Ganti atau hapus slide yang menggunakan media ini terlebih dahulu.`);
-      return;
-    }
-
-    if (!window.confirm(`Hapus "${item.title}" secara permanen?`)) return;
-
-    setIsDeleting(id);
+  
+  const handleDirectUploadMediaLibrary = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAdmin) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsUploading(true);
+    setUploadProgress(10);
     try {
-      console.log('ADMIN DELETE MEDIA:', id);
-      // Try to delete from IndexedDB
-      if (id.startsWith('media-')) {
-        await mediaDb.init();
-        await mediaDb.deleteMedia(id);
-        console.log('ADMIN STORAGE DELETE SUCCESS');
-      }
-      
-      onUpdateMediaLibrary(prev => {
-        const newList = prev.filter(m => m.id !== id);
-        console.log('ADMIN STATE UPDATED, NEW COUNT:', newList.length);
-        return newList;
-      });
-
-      if (item.url.startsWith('blob:')) {
-        URL.revokeObjectURL(item.url);
+      if (file.type.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = async () => {
+          window.URL.revokeObjectURL(video.src);
+          const duration = Math.round(video.duration);
+          try {
+            await videoService.uploadVideo(file, { width: video.videoWidth, height: video.videoHeight, duration });
+            setUploadProgress(100);
+            setIsUploading(false);
+          } catch (err) {
+            console.error(err);
+            alert('Gagal mengunggah video.');
+            setIsUploading(false);
+          }
+        };
+        video.src = window.URL.createObjectURL(file);
+      } else {
+        const img = new Image();
+        img.onload = async () => {
+          window.URL.revokeObjectURL(img.src);
+          try {
+            await mediaService.uploadMedia(file, {
+                            type: 'foto',
+              width: img.width,
+              height: img.height,
+              orientation: img.width > img.height ? 'LANDSCAPE' : img.width < img.height ? 'PORTRAIT' : 'SQUARE'
+            });
+            setUploadProgress(100);
+            setIsUploading(false);
+          } catch (err) {
+            console.error(err);
+            alert('Gagal mengunggah gambar.');
+            setIsUploading(false);
+          }
+        };
+        img.src = window.URL.createObjectURL(file);
       }
     } catch (err) {
+      console.error(err);
+      alert('Gagal memproses file.');
+      setIsUploading(false);
+    }
+  };
+const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAdmin) {
+      alert('Akses Ditolak: Hanya Administrator yang dapat mengunggah media.');
+      return;
+    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!newTitle.trim()) {
+      setNewTitle(file.name);
+    }
+
+    setIsUploading(true);
+    setUploadProgress(10);
+
+    try {
+      let uploadedItem: MediaItem | null = null;
+
+      if (newType === 'video') {
+        // Simple video metadata extraction
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = async () => {
+          window.URL.revokeObjectURL(video.src);
+          const duration = Math.round(video.duration);
+          const width = video.videoWidth;
+          const height = video.videoHeight;
+          
+          try {
+            setUploadProgress(30);
+            const res = await videoService.uploadVideo(file, { width, height, duration });
+            setUploadProgress(100);
+            
+            // App.tsx handles the state update via Realtime, 
+            // but we can manually update for immediate feedback
+            onUpdateMediaLibrary(prev => [
+              {
+                id: res.id,
+                title: res.title,
+                type: 'video',
+                url: res.url,
+                filePath: res.file_path,
+                category: 'Video',
+                dimensions: `${width} × ${height}`,
+                size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
+                dateAdded: new Date().toISOString().split('T')[0]
+              },
+              ...prev
+            ]);
+            
+            setIsAddModalOpen(false);
+            resetForm();
+          } catch (err: any) {
+            alert(`Gagal unggah video: ${err.message || 'Unknown error'}`);
+          } finally {
+            setIsUploading(false);
+          }
+        };
+        video.src = URL.createObjectURL(file);
+      } else {
+        // Image metadata extraction
+        const img = new Image();
+        img.onload = async () => {
+          const width = img.width;
+          const height = img.height;
+          const orientation = height > width ? 'portrait' : 'landscape';
+          
+          try {
+            setUploadProgress(50);
+            const res = await mediaService.uploadMedia(file, { 
+              width, 
+              height, 
+              orientation, 
+              type: newType 
+            });
+            
+            if (res) {
+              setUploadProgress(100);
+              onUpdateMediaLibrary(prev => [res, ...prev]);
+              setIsAddModalOpen(false);
+              resetForm();
+            }
+          } catch (err: any) {
+            alert(`Gagal unggah gambar: ${err.message || 'Unknown error'}`);
+          } finally {
+            setIsUploading(false);
+          }
+        };
+        img.src = URL.createObjectURL(file);
+      }
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      alert(`Error: ${err.message}`);
+      setIsUploading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setNewTitle('');
+    setNewCategory('');
+    setUploadProgress(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDeleteMedia = async (item: MediaItem) => {
+    if (isDeleting) return;
+
+    if (!window.confirm(`Hapus "${item.title}" secara permanen dari Supabase Storage dan Database?`)) return;
+
+    setIsDeleting(item.id);
+    try {
+      if (item.type === 'video') {
+        await videoService.deleteVideo(item.id, item.filePath || '');
+      } else {
+        await mediaService.deleteMedia(item.id, item.filePath || '');
+      }
+      
+      // Reload public.media
+      const [photos, videos] = await Promise.all([
+        mediaService.getAllMedia(),
+        videoService.getAllVideos()
+      ]);
+      
+      const combinedMedia: MediaItem[] = [
+        ...photos,
+        ...videos.map((v: any) => ({
+          id: v.id,
+          title: v.title,
+          type: 'video' as const,
+          url: v.url,
+          filePath: v.file_path,
+          category: 'Video',
+          dimensions: `${v.width} × ${v.height}`,
+          size: (v.file_size / (1024 * 1024)).toFixed(1) + ' MB',
+          dateAdded: v.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]
+        }))
+      ];
+      onUpdateMediaLibrary(combinedMedia);
+    } catch (err: any) {
       console.error('Error deleting media:', err);
-      alert('Gagal menghapus media. Silakan coba lagi.');
+      alert(`Gagal menghapus: ${err.message}`);
     } finally {
       setIsDeleting(null);
     }
@@ -127,23 +323,30 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
         <div>
           <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-[#0096D6]">
             <FolderKanban className="w-4 h-4 text-[#0096D6]" />
-            <span>PUSTAKA SUMBER DAYA DIGITAL SIGNAGE</span>
+            <span>PUSTAKA SUMBER DAYA SUPABASE</span>
           </div>
           <h2 className="text-2xl lg:text-3xl font-black font-display text-[#18181B] mt-1">
             MEDIA & GALERI KONTEN
           </h2>
           <p className="text-sm font-medium text-neutral-600 mt-0.5">
-            Pusat penyimpanan foto portrait, video 1080p, dan poster resmi untuk seluruh slide.
+            Penyimpanan resmi di cloud Supabase. Semua perubahan tersinkronisasi secara realtime.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-5 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
-        >
-          <Plus className="w-4 h-4 text-[#FFD166]" />
-          <span>+ UNGGAH / TAMBAH MEDIA</span>
-        </button>
+        {isAdmin ? (
+          <label
+            className="cursor-pointer bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] font-display font-black text-sm px-5 py-2.5 rounded-xl border-2 border-[#18181B] shadow-[2.5px_2.5px_0px_#18181B] flex items-center gap-2 transition-all hover:translate-y-[-1px]"
+          >
+            <input type="file" className="hidden" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" onChange={handleDirectUploadMediaLibrary} />
+            <Plus className="w-4 h-4 text-[#18181B]" />
+            <span>{isUploading ? 'MENGUNGGAH...' : 'UNGGAH FILE BARU'}</span>
+          </label>
+        ) : (
+          <div className="flex items-center gap-2 px-4 py-2 bg-neutral-100 border-2 border-neutral-300 rounded-xl text-neutral-600 text-xs font-mono font-bold">
+            <Lock className="w-3.5 h-3.5 text-neutral-500" />
+            <span>MODE BACA (READ-ONLY)</span>
+          </div>
+        )}
       </div>
 
       {/* Filter Tabs & Search Bar */}
@@ -233,22 +436,24 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
                   >
                     <Eye className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    disabled={isDeleting === item.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteMedia(item.id);
-                    }}
-                    className={`p-2 rounded-lg transition-colors ${
-                      isDeleting === item.id 
-                        ? 'bg-rose-600 text-white cursor-not-allowed' 
-                        : 'bg-rose-500/30 hover:bg-rose-600 text-white'
-                    }`}
-                    title="Hapus Media"
-                  >
-                    <Trash2 className={`w-4 h-4 ${isDeleting === item.id ? 'animate-spin' : ''}`} />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={isDeleting === item.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteMedia(item);
+                      }}
+                      className={`p-2 rounded-lg transition-colors ${
+                        isDeleting === item.id 
+                          ? 'bg-rose-600 text-white cursor-not-allowed' 
+                          : 'bg-rose-500/30 hover:bg-rose-600 text-white'
+                      }`}
+                      title="Hapus Media"
+                    >
+                      <Trash2 className={`w-4 h-4 ${isDeleting === item.id ? 'animate-spin' : ''}`} />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -265,22 +470,45 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
 
                 <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-[10px] font-mono text-neutral-400">
                   <span>{item.dateAdded}</span>
-                  <button
-                    type="button"
-                    disabled={isDeleting === item.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteMedia(item.id);
-                    }}
-                    className="text-rose-500 hover:text-rose-700 font-bold disabled:opacity-50"
-                  >
-                    {isDeleting === item.id ? 'Menghapus...' : 'Hapus'}
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      disabled={isDeleting === item.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteMedia(item);
+                      }}
+                      className="text-rose-500 hover:text-rose-700 font-bold disabled:opacity-50"
+                    >
+                      {isDeleting === item.id ? 'Menghapus...' : 'Hapus'}
+                    </button>
+                  ) : (
+                    <span className="text-neutral-400 font-mono">Tersimpan</span>
+                  )}
                 </div>
               </div>
             </div>
           ))}
         </div>
+        
+        {filteredMedia.length === 0 && (
+          <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border-2 border-dashed border-neutral-300 text-center space-y-4">
+            <ImagePlus className="w-12 h-12 text-neutral-400" />
+            <div>
+              <p className="text-base font-black font-display text-[#18181B]">BELUM ADA MEDIA</p>
+              <p className="text-xs text-neutral-500 max-w-sm mt-1">Upload foto atau video untuk menampilkannya di board display Anda.</p>
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="bg-[#0096D6] hover:bg-[#007AB0] text-white font-display font-bold text-xs px-4 py-2 rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] flex items-center gap-2 transition-all"
+              >
+                <Plus className="w-4 h-4 text-white" />
+                <span>+ UNGGAH FILE BARU</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* =========================================================================
@@ -291,19 +519,20 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
           <div className="bg-[#FFFDF9] rounded-2xl border-3 border-[#18181B] shadow-[6px_6px_0px_#18181B] max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b-2 border-neutral-200">
               <h3 className="text-lg font-black font-display text-[#18181B]">
-                UNGGAH / TAMBAH MEDIA BARU
+                UNGGAH FILE KE SUPABASE
               </h3>
               <button 
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-neutral-200"
+                onClick={() => !isUploading && setIsAddModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-neutral-200 disabled:opacity-50"
+                disabled={isUploading}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
+                <label className="block text-xs font-mono font-bold text-neutral-700 mb-2">
                   JENIS MEDIA
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -315,12 +544,13 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
                     <button
                       key={t.id}
                       type="button"
+                      disabled={isUploading}
                       onClick={() => setNewType(t.id as any)}
                       className={`p-2 rounded-xl text-xs font-bold font-display border-2 transition-all ${
                         newType === t.id
                           ? 'bg-[#0096D6] text-white border-[#18181B]'
-                          : 'bg-white text-neutral-700 border-neutral-300'
-                      }`}
+                          : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50'
+                      } disabled:opacity-50`}
                     >
                       {t.label}
                     </button>
@@ -330,57 +560,67 @@ export const AdminMediaLibrary: React.FC<AdminMediaLibraryProps> = ({
 
               <div>
                 <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
-                  NAMA / JUDUL MEDIA
+                  NAMA / JUDUL MEDIA (OPSIONAL)
                 </label>
                 <input
                   type="text"
-                  placeholder="Contoh: Praktikum Fisika Kelas XII..."
+                  placeholder="Nama file akan digunakan jika kosong..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-bold text-[#18181B] focus:outline-none"
+                  disabled={isUploading}
+                  className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-bold text-[#18181B] focus:outline-none disabled:bg-neutral-100"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
-                  URL MEDIA (GAMBAR ATAU MP4)
-                </label>
+              <div className="pt-2">
                 <input
-                  type="text"
-                  placeholder="https://..."
-                  value={newUrl}
-                  onChange={(e) => setNewUrl(e.target.value)}
-                  className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-mono focus:outline-none"
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept={newType === 'video' ? 'video/mp4,video/webm,video/quicktime' : 'image/*'}
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
-                  KATEGORI
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Pembelajaran, Ekstrakurikuler, Prestasi..."
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                  className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-bold text-[#18181B] focus:outline-none"
-                />
+                
+                {isUploading ? (
+                  <div className="bg-white p-6 rounded-2xl border-2 border-dashed border-[#0096D6] flex flex-col items-center justify-center space-y-4">
+                    <Loader2 className="w-8 h-8 text-[#0096D6] animate-spin" />
+                    <div className="text-center">
+                      <p className="text-xs font-bold text-[#18181B]">Sedang Mengunggah...</p>
+                      <p className="text-[10px] font-mono text-neutral-500 mt-1">{uploadProgress}% Selesai</p>
+                    </div>
+                    <div className="w-full bg-neutral-100 h-2 rounded-full overflow-hidden border border-neutral-200">
+                      <div 
+                        className="bg-[#0096D6] h-full transition-all duration-300" 
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full bg-white p-8 rounded-2xl border-2 border-dashed border-neutral-300 hover:border-[#0096D6] hover:bg-[#0096D6]/5 flex flex-col items-center justify-center space-y-3 transition-all group"
+                  >
+                    <div className="p-3 rounded-full bg-neutral-100 group-hover:bg-[#0096D6]/20 transition-colors">
+                      <UploadCloud className="w-6 h-6 text-neutral-500 group-hover:text-[#0096D6]" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-bold text-[#18181B]">Klik untuk pilih file</p>
+                      <p className="text-[10px] font-mono text-neutral-400 mt-1">
+                        {newType === 'video' ? 'MP4, WEBM, MOV (Max 50MB)' : 'JPG, PNG, WEBP (Max 5MB)'}
+                      </p>
+                    </div>
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-3 border-t-2 border-neutral-200">
+            <div className="flex justify-end pt-2">
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="px-4 py-2 rounded-xl font-display font-bold text-xs bg-neutral-200 text-neutral-800"
+                disabled={isUploading}
+                className="px-4 py-2 rounded-xl font-display font-bold text-xs bg-neutral-100 text-neutral-800 hover:bg-neutral-200 disabled:opacity-50"
               >
-                BATAL
-              </button>
-              <button
-                onClick={handleAddMedia}
-                disabled={!newTitle.trim() || !newUrl.trim()}
-                className="px-5 py-2 rounded-xl font-display font-black text-xs bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] disabled:opacity-40"
-              >
-                SIMPAN MEDIA
+                TUTUP
               </button>
             </div>
           </div>
