@@ -46,8 +46,16 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         onLoginSuccess();
       }
     } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err.message || 'Gagal login. Periksa email dan password Anda.');
+      console.error('SUPABASE LOGIN ERROR:', err);
+      let errMsg = err.message || 'Gagal login. Periksa email dan password Anda.';
+      if (errMsg.toLowerCase().includes('invalid login credentials')) {
+        errMsg = 'Email atau password salah.';
+      } else if (errMsg.toLowerCase().includes('failed to fetch')) {
+        errMsg = 'Gagal terhubung ke Supabase (Failed to fetch). Periksa VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY / VITE_SUPABASE_PUBLISHABLE_KEY.';
+      } else if (errMsg.toLowerCase().includes('email not confirmed')) {
+        errMsg = 'Email belum dikonfirmasi.';
+      }
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
