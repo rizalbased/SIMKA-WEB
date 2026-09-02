@@ -248,13 +248,17 @@ export const FullscreenDisplay: React.FC<FullscreenDisplayProps> = ({
       style={{
         margin: 0,
         padding: 0,
+        width: '100vw',
+        maxWidth: '100vw',
+        height: '100vh',
+        maxHeight: '100vh',
         display: 'grid',
-        gridTemplateRows: '62px 1fr 62px',
+        gridTemplateRows: '60px 1fr 60px',
         boxSizing: 'border-box'
       }}
     >
       {/* =========================================================================
-          ZONE 1: SIGNAGE HEADER (1920 × 62px)
+          ZONE 1: SIGNAGE HEADER (1920 × 60px)
           - Constant across all slides
           - School Brand | Center Board Title | Realtime Lesson & Clock
          ========================================================================= */}
@@ -267,24 +271,37 @@ export const FullscreenDisplay: React.FC<FullscreenDisplayProps> = ({
       />
 
       {/* =========================================================================
-          ZONE 2: MAIN CONTENT BROADCAST AREA (1920 × 956px)
+          ZONE 2: MAIN CONTENT BROADCAST AREA (1920 × 960px)
           - Full-bleed active slide with smooth transition
-          - Zero outer margin, zero card padding
+          - Zero outer margin, zero card padding, 100vw width
          ========================================================================= */}
       <main 
         id="simka-signage-main-content"
         className="w-full h-full relative overflow-hidden bg-black"
-        style={{ margin: 0, padding: 0 }}
+        style={{ 
+          width: '100vw', 
+          maxWidth: '100vw', 
+          margin: 0, 
+          padding: 0, 
+          overflow: 'hidden' 
+        }}
       >
         <div 
           className={`w-full h-full transition-all duration-500 ease-out transform ${getTransitionStyle(currentTransition)}`}
+          style={{
+            width: '100%',
+            height: '100%',
+            margin: 0,
+            padding: 0,
+            maxWidth: '100%'
+          }}
         >
           {renderSlideContent(currentSlide)}
         </div>
       </main>
 
       {/* =========================================================================
-          ZONE 3: RUNNING TEXT TICKER (1920 × 62px)
+          ZONE 3: RUNNING TEXT TICKER (1920 × 60px)
           - Constant across all slides
           - Smooth continuous marquee with amber badge
          ========================================================================= */}

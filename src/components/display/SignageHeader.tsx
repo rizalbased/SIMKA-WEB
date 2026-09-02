@@ -88,7 +88,7 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
   return (
     <header 
       id="simka-signage-header"
-      className="w-full h-[62px] flex items-center justify-between px-6 select-none z-30 flex-shrink-0 border-b-2"
+      className="w-full h-[60px] flex items-center justify-between px-6 select-none z-30 flex-shrink-0 border-b-2"
       style={{ 
         backgroundColor: headerBg, 
         color: headerTextColor,

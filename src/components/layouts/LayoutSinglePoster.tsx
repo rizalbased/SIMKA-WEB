@@ -18,29 +18,31 @@ export const LayoutSinglePoster: React.FC<LayoutSinglePosterProps> = ({
     <div 
       id="layout-single-poster-canvas"
       className="w-full h-full bg-black flex items-center justify-center overflow-hidden select-none relative"
-      style={{ margin: 0, padding: 0 }}
+      style={{
+        width: '100%',
+        height: '100%',
+        margin: 0,
+        padding: 0,
+        maxWidth: 'none',
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
     >
-      {/* 
-        Single Poster Display:
-        - Full width responsive rendering
-        - Retains exact native aspect ratio without distortion or cropping
-        - Centered horizontally & vertically
-        - No object-fit cover (object-fit: contain)
-      */}
       <img
         src={posterUrl || undefined}
         alt={posterTitle || "Poster Pengumuman Tunggal"}
-        className="w-full h-auto max-w-full max-h-full object-contain object-center block"
+        className="w-full h-auto max-w-full block"
         style={{
           width: '100%',
           height: 'auto',
           maxWidth: '100%',
-          maxHeight: '100%',
-          objectFit: 'contain',
-          objectPosition: 'center',
-          display: 'block',
           margin: 0,
-          padding: 0
+          padding: 0,
+          display: 'block',
+          objectFit: 'contain',
+          objectPosition: 'center'
         }}
         referrerPolicy="no-referrer"
         loading="eager"

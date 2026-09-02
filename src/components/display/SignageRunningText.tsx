@@ -47,7 +47,7 @@ export const SignageRunningText: React.FC<SignageRunningTextProps> = ({ config }
   return (
     <footer 
       id="simka-running-text-strip"
-      className="w-full h-[62px] flex items-center overflow-hidden select-none z-30 flex-shrink-0 relative border-t border-black/20 shadow-md"
+      className="w-full h-[60px] flex items-center overflow-hidden select-none z-30 flex-shrink-0 relative border-t border-black/20 shadow-md"
       style={{ 
         boxSizing: 'border-box',
         backgroundColor: bgColor,
