@@ -86,5 +86,42 @@ export const settingsService = {
       throw error;
     }
     return data;
+  },
+
+  async getRunningTextConfig() {
+    try {
+      const { data, error } = await supabase
+        .from('display_settings')
+        .select('*')
+        .eq('id', 'running_text_settings')
+        .single();
+        
+      if (error) {
+        if (error.code === 'PGRST116' || error.code === 'PGRST205') {
+          return null;
+        }
+        console.warn('Error fetching running text config:', error);
+        return null;
+      }
+      return data?.config || null;
+    } catch (err) {
+      console.warn('Network error fetching running text config:', err);
+      return null;
+    }
+  },
+
+  async saveRunningTextConfig(config: any) {
+    const { data, error } = await supabase
+      .from('display_settings')
+      .upsert({
+        id: 'running_text_settings',
+        config: config
+      });
+
+    if (error) {
+      console.error('Error saving running text settings:', error);
+      throw error;
+    }
+    return data;
   }
 };

@@ -153,11 +153,12 @@ export default function App() {
     const initData = async () => {
       try {
         // Fetch all data in parallel
-        const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme] = await Promise.all([
+        const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme, dbRunningTextConfig] = await Promise.all([
           slideService.getBoards(),
           runningTextService.getRunningText(),
           jadwalService.getJadwal(),
-          settingsService.getHeaderTheme()
+          settingsService.getHeaderTheme(),
+          settingsService.getRunningTextConfig()
         ]);
 
         await refreshMedia();
@@ -165,17 +166,23 @@ export default function App() {
         setBoards(dbBoards);
         setLessonPeriods(dbJadwal);
         
+        const updates: Partial<DisplayConfig> = {};
+        
         if (dbHeaderTheme) {
-          handleUpdateConfig({
-            headerThemeConfig: dbHeaderTheme
-          });
+          updates.headerThemeConfig = dbHeaderTheme;
         }
 
-        if (dbRunningText.length > 0) {
+        if (dbRunningTextConfig) {
+          Object.assign(updates, dbRunningTextConfig);
+        }
+
+        if (dbRunningText) {
           const activeText = dbRunningText.find(t => t.is_active);
-          if (activeText) {
-            handleUpdateConfig({ runningTextContent: activeText.content });
-          }
+          updates.runningTextContent = activeText ? activeText.content : '';
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          handleUpdateConfig(updates);
         }
       } catch (err) {
         console.error('Error initializing Supabase data:', err);
@@ -198,16 +205,23 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slides' }, () => slideService.getBoards().then(setBoards))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slide_media' }, () => slideService.getBoards().then(setBoards))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'display_settings' }, (payload) => {
-        if (payload.new && (payload.new as any).id === 'header_theme') {
-          settingsService.getHeaderTheme().then(theme => {
-            handleUpdateConfig({ headerThemeConfig: theme });
-          });
+        if (payload.new) {
+          const id = (payload.new as any).id;
+          if (id === 'header_theme') {
+            settingsService.getHeaderTheme().then(theme => {
+              handleUpdateConfig({ headerThemeConfig: theme });
+            });
+          } else if (id === 'running_text_settings') {
+            settingsService.getRunningTextConfig().then(config => {
+              if (config) handleUpdateConfig(config);
+            });
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'running_text' }, () => {
         runningTextService.getRunningText().then(data => {
-          const activeText = data.find(t => t.is_active);
-          if (activeText) handleUpdateConfig({ runningTextContent: activeText.content });
+          const activeText = data?.find(t => t.is_active);
+          handleUpdateConfig({ runningTextContent: activeText ? activeText.content : '' });
         });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jadwal_les' }, () => {

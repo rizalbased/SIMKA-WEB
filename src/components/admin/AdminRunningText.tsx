@@ -16,6 +16,8 @@ import {
 import { runningTextService } from '../../services/runningTextService';
 import { SignageRunningText } from '../display/SignageRunningText';
 
+import { settingsService } from '../../services/settingsService';
+
 interface AdminRunningTextProps {
   config: DisplayConfig;
   onUpdateConfig: (config: Partial<DisplayConfig>) => void;
@@ -123,8 +125,8 @@ export const AdminRunningText: React.FC<AdminRunningTextProps> = ({
       await runningTextService.updateRunningText([
         { content: tickerText, is_active: true }
       ]);
-
-      onUpdateConfig({
+      
+      const rtConfig = {
         runningTextContent: tickerText,
         runningTextCategory: badgeText,
         runningTextSpeed: speedSec,
@@ -132,7 +134,11 @@ export const AdminRunningText: React.FC<AdminRunningTextProps> = ({
         runningTextTextColor: textColor,
         runningTextBadgeBg: badgeBg,
         runningTextBadgeTextColor: badgeTextColor
-      });
+      };
+
+      await settingsService.saveRunningTextConfig(rtConfig);
+
+      onUpdateConfig(rtConfig);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
     } catch (err) {

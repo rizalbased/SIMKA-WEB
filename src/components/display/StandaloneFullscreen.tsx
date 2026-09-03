@@ -18,11 +18,12 @@ export const StandaloneFullscreen: React.FC = () => {
   // Helper to fetch all data cleanly
   const fetchAllData = async () => {
     try {
-      const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme] = await Promise.all([
+      const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme, dbRunningTextConfig] = await Promise.all([
         slideService.getBoards(),
         runningTextService.getRunningText(),
         jadwalService.getJadwal(),
-        settingsService.getHeaderTheme()
+        settingsService.getHeaderTheme(),
+        settingsService.getRunningTextConfig()
       ]);
 
       if (dbBoards && dbBoards.length > 0) {
@@ -32,11 +33,18 @@ export const StandaloneFullscreen: React.FC = () => {
       }
 
       const activeText = dbRunningText?.find(t => t.is_active);
-      setConfig(prev => ({
-        ...prev,
-        headerThemeConfig: dbHeaderTheme || prev.headerThemeConfig,
-        runningTextContent: activeText ? activeText.content : prev.runningTextContent
-      }));
+      setConfig(prev => {
+        const updates: any = {
+          headerThemeConfig: dbHeaderTheme || prev.headerThemeConfig,
+          runningTextContent: activeText ? activeText.content : ''
+        };
+        
+        if (dbRunningTextConfig) {
+          Object.assign(updates, dbRunningTextConfig);
+        }
+        
+        return { ...prev, ...updates };
+      });
 
       if (dbJadwal) setLessonPeriods(dbJadwal);
     } catch (err) {
@@ -57,7 +65,7 @@ export const StandaloneFullscreen: React.FC = () => {
     const activeText = dbRunningText?.find(t => t.is_active);
     setConfig(prev => ({
       ...prev,
-      runningTextContent: activeText ? activeText.content : prev.runningTextContent
+      runningTextContent: activeText ? activeText.content : ''
     }));
   };
 
@@ -70,6 +78,13 @@ export const StandaloneFullscreen: React.FC = () => {
     const dbHeaderTheme = await settingsService.getHeaderTheme();
     if (dbHeaderTheme) {
       setConfig(prev => ({ ...prev, headerThemeConfig: dbHeaderTheme }));
+    }
+  };
+
+  const reloadRunningTextConfig = async () => {
+    const config = await settingsService.getRunningTextConfig();
+    if (config) {
+      setConfig(prev => ({ ...prev, ...config }));
     }
   };
 
@@ -99,8 +114,13 @@ export const StandaloneFullscreen: React.FC = () => {
         reloadJadwal();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'display_settings' }, (payload) => {
-        if (payload.new && (payload.new as any).id === 'header_theme') {
-          reloadDisplaySettings();
+        if (payload.new) {
+          const id = (payload.new as any).id;
+          if (id === 'header_theme') {
+            reloadDisplaySettings();
+          } else if (id === 'running_text_settings') {
+            reloadRunningTextConfig();
+          }
         }
       })
       .subscribe((status) => {

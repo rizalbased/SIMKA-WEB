@@ -154,7 +154,7 @@ export const FullscreenDisplay: React.FC<FullscreenDisplayProps> = ({
     if (!slide) {
       return (
         <div className="w-full h-full flex items-center justify-center bg-black text-gray-400">
-          <p className="text-xl font-bold font-mono">TIDAK ADA SLIDE AKTIF PADA BOARD</p>
+          <p className="text-xl font-bold font-mono">TIDAK ADA SLIDE AKTIF</p>
         </div>
       );
     }
@@ -263,10 +263,7 @@ export const FullscreenDisplay: React.FC<FullscreenDisplayProps> = ({
           - School Brand | Center Board Title | Realtime Lesson & Clock
          ========================================================================= */}
       <SignageHeader 
-        config={{
-          ...config,
-          headerCenterText: currentBoard?.name || config.headerCenterText
-        }} 
+        config={config} 
         lessonPeriods={lessonPeriods}
       />
 
