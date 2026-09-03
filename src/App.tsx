@@ -23,6 +23,7 @@ import { runningTextService } from './services/runningTextService';
 import { jadwalService } from './services/jadwalService';
 import { settingsService } from './services/settingsService';
 import { FullscreenDisplay } from './components/display/FullscreenDisplay';
+import { StandaloneFullscreen } from './components/display/StandaloneFullscreen';
 import { AdminHeader } from './components/admin/AdminHeader';
 import { AdminSidebar } from './components/admin/AdminSidebar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -35,6 +36,7 @@ import { Login } from './components/auth/Login';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
+  const [isStandaloneFullscreen, setIsStandaloneFullscreen] = useState(false);
   // Primary Mode: Admin vs Fullscreen Digital Signage
   const [mode, setMode] = useState<DisplayMode>('login');
   const [activeTab, setActiveTab] = useState<AdminTab>('beranda');
@@ -76,6 +78,16 @@ export default function App() {
 
   // Load initial data from Supabase
   useEffect(() => {
+    const handleHashChange = () => {
+      if (window.location.hash === '#/fullscreen') {
+        setIsStandaloneFullscreen(true);
+      } else {
+        setIsStandaloneFullscreen(false);
+      }
+    };
+    handleHashChange(); // check immediately
+    window.addEventListener('hashchange', handleHashChange);
+
     const urlParams = new URLSearchParams(window.location.search);
     const modeParam = urlParams.get('mode');
 
@@ -83,7 +95,7 @@ export default function App() {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (modeParam === 'display') {
+      if (modeParam === 'display' || window.location.hash === '#/fullscreen') {
         setMode('display');
         setIsInitializing(false);
       } else if (session) {
@@ -103,7 +115,7 @@ export default function App() {
         await fetchUserProfile(session.user.id);
       } else if (event === 'SIGNED_OUT') {
         setUserProfile(null);
-        if (modeParam !== 'display') {
+        if (modeParam !== 'display' && window.location.hash !== '#/fullscreen') {
           setMode('login');
         }
       }
@@ -217,6 +229,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(mediaChannel);
       subscription.unsubscribe();
+      window.removeEventListener('hashchange', handleHashChange);
     };
   }, []);
 
@@ -276,6 +289,10 @@ export default function App() {
   const activeBoardName = activeBoard?.name || (boards.length === 0 ? 'Belum Ada Board' : 'Papan Utama');
   const totalSlidesCount = activeBoard?.slides?.filter(s => s.enabled)?.length || 0;
 
+  if (isStandaloneFullscreen) {
+    return <StandaloneFullscreen />;
+  }
+
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-[#FFFDF9] flex flex-col items-center justify-center p-4">
@@ -324,7 +341,7 @@ export default function App() {
         <AdminSidebar
           activeTab={activeTab}
           onSelectTab={setActiveTab}
-          onLaunchFullscreen={() => setMode('display')}
+          onLaunchFullscreen={() => { window.location.hash = '#/fullscreen'; }}
           onLogout={handleLogout}
           activeBoardName={activeBoardName}
           totalSlidesCount={totalSlidesCount}
@@ -342,7 +359,7 @@ export default function App() {
               screens={screens}
               config={config}
               onNavigateTab={(tab) => setActiveTab(tab)}
-              onLaunchFullscreen={() => setMode('display')}
+              onLaunchFullscreen={() => { window.location.hash = '#/fullscreen'; }}
               userRole={userProfile?.role || 'user'}
             />
           )}
@@ -367,7 +384,7 @@ export default function App() {
               onUpdateMediaLibrary={setMediaLibrary}
               onUpdateConfig={handleUpdateConfig}
               onSetActiveBoard={handleSetActiveBoard}
-              onLaunchFullscreen={() => setMode('display')}
+              onLaunchFullscreen={() => { window.location.hash = '#/fullscreen'; }}
               userRole={userProfile?.role || 'user'}
             />
           )}
