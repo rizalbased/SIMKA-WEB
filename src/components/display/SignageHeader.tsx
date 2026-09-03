@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
 import { DisplayConfig, LessonPeriod } from '../../types';
 
 interface SignageHeaderProps {
@@ -79,7 +80,7 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
   const headerBg = t.background || '#009FE3';
   const headerTextColor = t.text || '#FFFFFF';
   const brandBgColor = t.brandBg || '#003B5C';
-  const brandTextColor = t.brand || t.brandText || '#FFFFFF';
+  const brandTextColor = t.brand || '#FFFFFF';
   const dateTextColor = t.date || t.dateText || headerTextColor;
   const clockBgColor = t.clockBackground || t.clockBg || '#06243A';
   const clockTextColor = t.clockText || '#FFD166';
@@ -98,12 +99,21 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
     >
       {/* LEFT: School Logo / SIMKA Brand */}
       <div className="flex items-center gap-3">
-        <div 
-          className="px-4 py-1.5 font-black text-xl tracking-wider rounded font-display flex items-center gap-2 border border-black/20"
-          style={{ backgroundColor: brandBgColor, color: brandTextColor }}
-        >
-          <span>{config.headerLeftText || 'SIMKA'}</span>
-        </div>
+        {t.logoEnabled && t.logoPath ? (
+          <img 
+            src={t.logoPath.startsWith('http') ? t.logoPath : supabase.storage.from('simka-logo').getPublicUrl(t.logoPath).data.publicUrl} 
+            alt="Logo"
+            style={{ width: t.logoWidth || 105, height: t.logoHeight || 42, objectFit: 'contain' }}
+            className="select-none"
+          />
+        ) : (
+          <div 
+            className="px-4 py-1.5 font-black text-xl tracking-wider rounded font-display flex items-center gap-2 border border-black/20"
+            style={{ backgroundColor: brandBgColor, color: brandTextColor }}
+          >
+            <span>{t.brandText || 'SIMKA'}</span>
+          </div>
+        )}
       </div>
 
       {/* CENTER: Main Board Center Title (e.g. PUSAT INFORMASI EMKA) */}
@@ -112,7 +122,7 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
           className="text-xl sm:text-2xl font-black uppercase tracking-widest font-display truncate"
           style={{ color: headerTextColor }}
         >
-          {config.headerCenterText || 'PUSAT INFORMASI EMKA'}
+          {t.centerTitle || 'PUSAT INFORMASI EMKA'}
         </h1>
       </div>
 

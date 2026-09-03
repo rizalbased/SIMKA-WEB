@@ -91,7 +91,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   const [headerBg, setHeaderBg] = useState(currentTheme.background || '#009FE3');
   const [headerText, setHeaderText] = useState(currentTheme.text || '#FFFFFF');
   const [brandBg, setBrandBg] = useState(currentTheme.brandBg || '#003B5C');
-  const [brandText, setBrandText] = useState(currentTheme.brand || currentTheme.brandText || '#FFFFFF');
+  const [brandTextColor, setBrandTextColor] = useState(currentTheme.brand || currentTheme.brandText || '#FFFFFF');
   const [dateText, setDateText] = useState(currentTheme.date || currentTheme.dateText || '#FFFFFF');
   const [clockBg, setClockBg] = useState(currentTheme.clockBackground || currentTheme.clockBg || '#06243A');
   const [clockText, setClockText] = useState(currentTheme.clockText || '#FFD166');
@@ -111,7 +111,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       setHeaderBg(tc.background || '#009FE3');
       setHeaderText(tc.text || '#FFFFFF');
       setBrandBg(tc.brandBg || '#003B5C');
-      setBrandText(tc.brand || tc.brandText || '#FFFFFF');
+      setBrandTextColor(tc.brand || tc.brandText || '#FFFFFF');
       setDateText(tc.date || tc.dateText || '#FFFFFF');
       setClockBg(tc.clockBackground || tc.clockBg || '#06243A');
       setClockText(tc.clockText || '#FFD166');
@@ -228,9 +228,9 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       preset: headerThemePreset,
       background: headerBg,
       text: headerText,
-      brand: brandText,
+      brand: brandTextColor,
       brandBg: brandBg,
-      brandText: brandText,
+      brandText: config.headerThemeConfig?.brandText || "",
       date: dateText,
       dateText: dateText,
       clockBackground: clockBg,
@@ -1910,11 +1910,12 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
               config={{
                 ...config,
                 headerThemeConfig: {
+                  ...config.headerThemeConfig,
                   preset: headerThemePreset,
                   background: headerBg,
                   text: headerText,
                   brandBg: brandBg,
-                  brandText: brandText,
+                  brand: brandTextColor,
                   dateText: dateText,
                   clockBg: clockBg,
                   clockText: clockText,
@@ -1939,7 +1940,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
                   setHeaderBg(th.background);
                   setHeaderText(th.text);
                   setBrandBg(th.brandBg);
-                  setBrandText(th.brandText);
+                  setBrandTextColor(th.brandText);
                   setDateText(th.dateText);
                   setClockBg(th.clockBg);
                   setClockText(th.clockText);
@@ -2005,8 +2006,8 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           <div className="space-y-1.5">
             <label className="text-xs font-mono font-bold text-neutral-700">Warna Brand/Logo Text:</label>
             <div className="flex items-center gap-2">
-              <input type="color" value={brandText} onChange={(e) => setBrandText(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
-              <input type="text" value={brandText} onChange={(e) => setBrandText(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
+              <input type="color" value={brandTextColor} onChange={(e) => setBrandTextColor(e.target.value)} className="w-10 h-10 rounded-lg border-2 border-[#18181B] cursor-pointer p-0.5 bg-white" />
+              <input type="text" value={brandTextColor} onChange={(e) => setBrandTextColor(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-[#18181B] font-mono text-xs uppercase" />
             </div>
           </div>
 

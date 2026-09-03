@@ -154,6 +154,11 @@ export interface HeaderThemeConfig {
   brand?: string;
   brandBg: string;
   brandText?: string;
+  centerTitle?: string;
+  logoEnabled?: boolean;
+  logoPath?: string | null;
+  logoWidth?: number;
+  logoHeight?: number;
   date?: string;
   dateText?: string;
   clockBackground?: string;

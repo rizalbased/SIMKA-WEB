@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { DisplayConfig } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { settingsService } from '../../services/settingsService';
 import { 
   Settings, 
   Tv, 
@@ -11,7 +13,10 @@ import {
   Check, 
   RotateCcw,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  Upload,
+  Trash2,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface AdminSettingsProps {
@@ -25,11 +30,73 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 }) => {
   const [formData, setFormData] = useState<DisplayConfig>({ ...config });
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleSave = () => {
-    onUpdateConfig(formData);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+  const handleSave = async () => {
+    try {
+      if (formData.headerThemeConfig) {
+        await settingsService.saveHeaderTheme(formData.headerThemeConfig);
+      }
+      onUpdateConfig(formData);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (err: any) {
+      console.error('Error saving settings:', err);
+      alert(`Gagal menyimpan pengaturan: ${err.message || 'Terjadi kesalahan'}`);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.type !== 'image/png') {
+      alert("Logo harus berformat PNG.");
+      return;
+    }
+    
+    try {
+      setIsUploading(true);
+      const fileName = `branding/logo-${Date.now()}.png`;
+      const { data, error } = await supabase.storage.from('simka-logo').upload(fileName, file);
+      
+      if (error) {
+        throw error;
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        headerThemeConfig: {
+          ...prev.headerThemeConfig,
+          logoEnabled: true,
+          logoPath: data.path
+        }
+      } as DisplayConfig));
+    } catch (err: any) {
+      console.error('Error uploading logo:', err);
+      alert(`Gagal upload logo: ${err.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    const path = formData.headerThemeConfig?.logoPath;
+    if (path) {
+      try {
+        await supabase.storage.from('simka-logo').remove([path]);
+      } catch (err) {
+        console.warn('Error deleting logo from storage:', err);
+      }
+    }
+    setFormData(prev => ({
+      ...prev,
+      headerThemeConfig: {
+        ...prev.headerThemeConfig,
+        logoEnabled: false,
+        logoPath: null
+      }
+    } as DisplayConfig));
   };
 
   return (
@@ -66,15 +133,18 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             <span>IDENTITAS HEADER DIGITAL SIGNAGE</span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div>
               <label className="block text-xs font-mono font-bold text-neutral-700 mb-1">
                 TEKS BRAND KIRI (LOGO / NAMA SEKOLAH)
               </label>
               <input
                 type="text"
-                value={formData.headerLeftText || ''}
-                onChange={(e) => setFormData({ ...formData, headerLeftText: e.target.value })}
+                value={formData.headerThemeConfig?.brandText || ''}
+                onChange={(e) => setFormData({ 
+                  ...formData, 
+                  headerThemeConfig: { ...formData.headerThemeConfig, brandText: e.target.value } as any
+                })}
                 className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-bold text-[#18181B] focus:outline-none"
               />
             </div>
@@ -85,10 +155,57 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               </label>
               <input
                 type="text"
-                value={formData.headerCenterText || ''}
-                onChange={(e) => setFormData({ ...formData, headerCenterText: e.target.value })}
+                value={formData.headerThemeConfig?.centerTitle || ''}
+                onChange={(e) => setFormData({ 
+                  ...formData, 
+                  headerThemeConfig: { ...formData.headerThemeConfig, centerTitle: e.target.value } as any
+                })}
                 className="w-full bg-white p-2.5 rounded-xl border-2 border-[#18181B] text-xs font-bold text-[#18181B] focus:outline-none"
               />
+            </div>
+            
+            <div className="border-t-2 border-neutral-100 pt-3">
+              <label className="block text-xs font-mono font-bold text-neutral-700 mb-2">
+                LOGO HEADER (PNG SAJA)
+              </label>
+              
+              {formData.headerThemeConfig?.logoEnabled && formData.headerThemeConfig?.logoPath ? (
+                <div className="bg-neutral-100 p-4 rounded-xl border-2 border-neutral-200 flex flex-col items-center justify-center space-y-3">
+                  <div className="bg-neutral-800 p-2 rounded flex items-center justify-center" style={{ width: '200px', height: '60px' }}>
+                    <img 
+                      src={formData.headerThemeConfig.logoPath.startsWith('http') ? formData.headerThemeConfig.logoPath : supabase.storage.from('simka-logo').getPublicUrl(formData.headerThemeConfig.logoPath).data.publicUrl} 
+                      alt="Logo Preview" 
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                  <button
+                    onClick={handleDeleteLogo}
+                    className="flex items-center gap-2 text-xs font-bold text-red-600 hover:text-red-700 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    HAPUS LOGO
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-neutral-50 p-4 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center space-y-3">
+                  <ImageIcon className="w-8 h-8 text-neutral-400" />
+                  <p className="text-xs text-neutral-500 font-medium text-center">
+                    Upload logo format PNG dengan background transparan.
+                  </p>
+                  
+                  <label className="cursor-pointer bg-white px-4 py-2 rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] hover:translate-y-[-1px] transition-all flex items-center gap-2 text-xs font-bold">
+                    <Upload className="w-4 h-4" />
+                    {isUploading ? 'MENGUNGGAH...' : '+ UPLOAD LOGO PNG'}
+                    <input 
+                      type="file" 
+                      accept="image/png" 
+                      className="hidden" 
+                      onChange={handleLogoUpload}
+                      disabled={isUploading}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
 
             <div>
