@@ -8,9 +8,10 @@ import {
   NewsSearchParams, 
   AIQueryUnderstanding, 
   FactCheckResult,
-  NewsSortOption
+  NewsSortOption,
+  NewsSearchErrorDetail
 } from '../types';
-import { PublicVerifiedRssProvider, OmniRouteNewsProvider } from './newsProvider';
+import { PublicVerifiedRssProvider, OmniRouteNewsProvider, testEdgeFunctionHealth } from './newsProvider';
 
 const rssProvider = new PublicVerifiedRssProvider();
 const omnirouteProvider = new OmniRouteNewsProvider();
@@ -110,10 +111,18 @@ export const newsService = {
   /**
    * Pencarian Berita Utama dengan multi-provider, filter, sorting, dan caching
    */
-  async searchNews(params: NewsSearchParams): Promise<{ articles: NewsArticle[]; queryUnderstanding?: AIQueryUnderstanding }> {
+  async searchNews(params: NewsSearchParams): Promise<{ 
+    articles: NewsArticle[]; 
+    queryUnderstanding?: AIQueryUnderstanding;
+    error?: string;
+    errorDetail?: NewsSearchErrorDetail;
+    source?: string;
+  }> {
+    console.log('[SIMKA BERITA] 1. Query User:', params.query || '(Semua Berita)');
     let queryUnderstanding: AIQueryUnderstanding | undefined;
     if (params.query && params.query.trim().length > 0) {
       queryUnderstanding = parseQueryWithAI(params.query);
+      console.log('[SIMKA BERITA] 2. Hasil Intent:', queryUnderstanding);
       // Sinkronkan kategori/lokasi jika user tidak memilih manual
       if ((!params.category || params.category === 'SEMUA') && queryUnderstanding.interpretedCategory && queryUnderstanding.interpretedCategory !== 'SEMUA') {
         params.category = queryUnderstanding.interpretedCategory;
@@ -127,29 +136,37 @@ export const newsService = {
     }
 
     let rawArticles: NewsArticle[] = [];
+    let searchError: string | undefined = undefined;
+    let searchErrorDetail: NewsSearchErrorDetail | undefined = undefined;
+    let searchSource: string | undefined = undefined;
 
-    // 1. Coba Pemrosesan AI OmniRoute via Supabase Edge Function
-    try {
-      const omniResults = await omnirouteProvider.search(params);
-      if (omniResults && omniResults.length > 0) {
-        rawArticles.push(...omniResults);
+    // 1. Eksekusi Pencarian AI OmniRoute via Supabase Edge Function
+    const omniResult = await omnirouteProvider.search(params);
+    if ('articles' in omniResult && Array.isArray(omniResult.articles)) {
+      if (omniResult.articles.length > 0) {
+        rawArticles.push(...omniResult.articles);
+        searchSource = omniResult.source;
+      } else if (omniResult.error || omniResult.errorDetail) {
+        searchError = omniResult.error;
+        searchErrorDetail = omniResult.errorDetail;
       }
-    } catch {
-      // lanjut ke verified RSS
     }
 
-    // 2. Gunakan Public Verified RSS Feed (ANTARA News, BMKG, Portals)
-    try {
-      const rssResults = await rssProvider.search(params);
-      if (rssResults && rssResults.length > 0) {
-        rawArticles.push(...rssResults);
+    // 2. Jika query kosong atau OmniRoute tidak ada error fatal dan rawArticles kosong, gunakan Public Verified RSS
+    if (rawArticles.length === 0 && (!params.query || params.query.trim().length === 0)) {
+      try {
+        const rssResults = await rssProvider.search(params);
+        if (Array.isArray(rssResults) && rssResults.length > 0) {
+          rawArticles.push(...rssResults);
+          searchSource = 'Verified News Network (ANTARA, BMKG)';
+        }
+      } catch (e) {
+        console.warn('Error fetching RSS news:', e);
       }
-    } catch (e) {
-      console.warn('Error fetching RSS news:', e);
     }
 
-    // 3. Fallback: Ambil dari Cache Database Supabase jika network terkendala
-    if (rawArticles.length === 0) {
+    // 3. Fallback: Ambil dari Cache Database Supabase jika network terkendala dan tidak ada error fatal
+    if (rawArticles.length === 0 && !searchError) {
       try {
         let query = supabase.from('news_articles').select('*').order('published_at', { ascending: false }).limit(20);
         if (params.category && params.category !== 'SEMUA') {
@@ -182,7 +199,7 @@ export const newsService = {
       }
     }
 
-    // 4. Deduplikasi menggunakan source_url sebagai identifier utama (Syarat 27)
+    // 4. Deduplikasi menggunakan source_url sebagai identifier utama (Syarat 15 & 27)
     const seenUrls = new Set<string>();
     let uniqueArticles: NewsArticle[] = [];
 
@@ -243,12 +260,17 @@ export const newsService = {
     const sort = params.sort || 'RELEVAN_TERBARU';
     uniqueArticles = this.sortArticles(uniqueArticles, sort, params.query);
 
-    // 9. Simpan ke Cache Supabase secara asynchronous (tidak memblokir UI)
-    this.cacheArticlesToSupabase(uniqueArticles).catch(e => console.warn('Cache error:', e));
+    // 9. Simpan hasil ke public.news_articles (Syarat 14 & 15)
+    if (uniqueArticles.length > 0) {
+      this.cacheArticlesToSupabase(uniqueArticles).catch(e => console.warn('Cache error:', e));
+    }
 
     return {
       articles: uniqueArticles,
-      queryUnderstanding
+      queryUnderstanding,
+      error: searchError,
+      errorDetail: searchErrorDetail,
+      source: searchSource
     };
   },
 
@@ -453,12 +475,13 @@ export const newsService = {
   },
 
   /**
-   * Cache deduplicated articles to Supabase
+   * Simpan artikel ke database Supabase (public.news_articles)
+   * Menggunakan source_url sebagai deduplikasi (Syarat 14 & 15)
    */
   async cacheArticlesToSupabase(articles: NewsArticle[]): Promise<void> {
     if (!articles || articles.length === 0) return;
     try {
-      const records = articles.slice(0, 10).map(a => ({
+      const records = articles.map(a => ({
         title: a.title,
         summary: a.summary,
         category: a.category,
@@ -476,9 +499,21 @@ export const newsService = {
         ai_summary: a.ai_summary || null
       }));
 
-      await supabase.from('news_articles').upsert(records, { onConflict: 'source_url' });
-    } catch {
-      // Non-blocking caching
+      const { error } = await supabase.from('news_articles').upsert(records, { onConflict: 'source_url' });
+      if (error) {
+        console.warn('[SIMKA BERITA] Database save warning:', error.message);
+      } else {
+        console.log(`[SIMKA BERITA] ${records.length} berita berhasil disimpan ke public.news_articles`);
+      }
+    } catch (err: any) {
+      console.warn('[SIMKA BERITA] Database save exception:', err?.message || err);
     }
+  },
+
+  /**
+   * Health check untuk Edge Function news-search
+   */
+  async checkHealth() {
+    return testEdgeFunctionHealth();
   }
 };

@@ -26,7 +26,15 @@ import {
   RotateCw,
   Info,
   Check,
-  Tag
+  Tag,
+  Activity,
+  Server,
+  WifiOff,
+  Terminal,
+  Key,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw
 } from 'lucide-react';
 import { 
   NewsArticle, 
@@ -36,7 +44,9 @@ import {
   NewsDateRange,
   AIQueryUnderstanding,
   FactCheckResult,
-  UserRole
+  UserRole,
+  NewsSearchErrorDetail,
+  NewsErrorCode
 } from '../../types';
 import { newsService } from '../../services/newsService';
 import { COUNTRIES, EDUCATION_LEVELS, JOB_FIELDS } from '../../data/indonesiaLocations';
@@ -97,6 +107,10 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('AI SEDANG MENCARI BERITA TERKINI...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<NewsSearchErrorDetail | null>(null);
+  const [showTechDetails, setShowTechDetails] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle');
+  const [healthResult, setHealthResult] = useState<any>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Modal Fact Check state
@@ -107,6 +121,76 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   const currentCountryData = COUNTRIES.find(c => c.name === selectedCountry) || COUNTRIES[0];
   const currentProvinceData = currentCountryData.provinces.find(p => p.name === selectedProvince);
   const availableCities = currentProvinceData ? currentProvinceData.cities : ['Semua Kota/Kabupaten'];
+
+  const getErrorCodeBadge = (code?: NewsErrorCode) => {
+    switch (code) {
+      case 'EDGE_FUNCTION_UNREACHABLE':
+        return {
+          bg: 'bg-rose-100',
+          text: 'text-rose-900',
+          border: 'border-rose-800',
+          icon: WifiOff,
+          label: 'EDGE_FUNCTION_UNREACHABLE'
+        };
+      case 'OMNIROUTE_AUTH_ERROR':
+        return {
+          bg: 'bg-red-100',
+          text: 'text-red-900',
+          border: 'border-red-800',
+          icon: Key,
+          label: 'OMNIROUTE_AUTH_ERROR'
+        };
+      case 'OMNIROUTE_NOT_FOUND':
+        return {
+          bg: 'bg-amber-100',
+          text: 'text-amber-900',
+          border: 'border-amber-800',
+          icon: Server,
+          label: 'OMNIROUTE_NOT_FOUND'
+        };
+      case 'PROVIDER_ERROR':
+        return {
+          bg: 'bg-purple-100',
+          text: 'text-purple-900',
+          border: 'border-purple-800',
+          icon: Radio,
+          label: 'PROVIDER_ERROR'
+        };
+      case 'OMNIROUTE_ERROR':
+        return {
+          bg: 'bg-orange-100',
+          text: 'text-orange-900',
+          border: 'border-orange-800',
+          icon: Activity,
+          label: 'OMNIROUTE_ERROR'
+        };
+      case 'INVALID_AI_RESPONSE':
+        return {
+          bg: 'bg-fuchsia-100',
+          text: 'text-fuchsia-900',
+          border: 'border-fuchsia-800',
+          icon: Terminal,
+          label: 'INVALID_AI_RESPONSE'
+        };
+      case 'EDGE_FUNCTION_ERROR':
+        return {
+          bg: 'bg-rose-100',
+          text: 'text-rose-900',
+          border: 'border-rose-800',
+          icon: AlertTriangle,
+          label: 'EDGE_FUNCTION_ERROR'
+        };
+      case 'NO_NEWS_FOUND':
+      default:
+        return {
+          bg: 'bg-blue-100',
+          text: 'text-blue-900',
+          border: 'border-blue-800',
+          icon: Search,
+          label: 'NO_NEWS_FOUND'
+        };
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -133,9 +217,34 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
     }
   };
 
+  const handleHealthCheck = async () => {
+    setHealthStatus('checking');
+    try {
+      const res = await newsService.checkHealth();
+      if (res.online) {
+        setHealthStatus('online');
+        setHealthResult(res.data);
+        showToast('✓ Edge Function news-search ONLINE & siap digunakan');
+      } else {
+        setHealthStatus('offline');
+        setHealthResult(res.error || res.data);
+        showToast('⚠ Edge Function news-search belum aktif / offline');
+        if (articles.length === 0 && res.error) {
+          setErrorDetail(res.error);
+          setErrorMessage(res.error.message);
+        }
+      }
+    } catch (err: any) {
+      setHealthStatus('offline');
+      setHealthResult(err);
+      showToast('⚠ Gagal cek status Edge Function');
+    }
+  };
+
   const handleSearch = async (customParams?: Partial<NewsSearchParams>) => {
     setIsLoading(true);
     setErrorMessage(null);
+    setErrorDetail(null);
     setLoadingMessage('AI SEDANG MENCARI BERITA TERKINI...');
 
     try {
@@ -155,12 +264,42 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
       setArticles(result.articles);
       setQueryUnderstanding(result.queryUnderstanding || null);
 
-      if (result.articles.length === 0) {
-        setErrorMessage('BERITA TIDAK DITEMUKAN. Coba kata kunci lain atau pilih preset kategori di atas.');
+      if (result.articles.length > 0) {
+        setErrorMessage(null);
+        setErrorDetail(null);
+      } else if (result.errorDetail) {
+        setErrorMessage(result.errorDetail.message);
+        setErrorDetail(result.errorDetail);
+      } else if (result.error) {
+        setErrorMessage(result.error);
+        setErrorDetail({
+          code: 'EDGE_FUNCTION_ERROR',
+          title: 'Gagal Memuat Berita',
+          message: result.error,
+          errorMessage: result.error
+        });
+      } else {
+        const notFound: NewsSearchErrorDetail = {
+          code: 'NO_NEWS_FOUND',
+          title: 'Berita Tidak Ditemukan',
+          message: 'Pencarian AI tidak menemukan artikel berita yang cocok dengan kriteria ini.',
+          recommendation: 'Coba gunakan kata kunci yang lebih umum atau pilih preset kategori berita di atas.'
+        };
+        setErrorMessage(notFound.message);
+        setErrorDetail(notFound);
       }
     } catch (err: any) {
-      console.error('Search error:', err);
-      setErrorMessage('LAYANAN BERITA SEMENTARA TIDAK TERSEDIA');
+      console.error('[SIMKA BERITA] Search error:', err);
+      const unreachable: NewsSearchErrorDetail = {
+        code: 'EDGE_FUNCTION_UNREACHABLE',
+        title: 'Edge Function Tidak Dapat Dihubungi',
+        message: err.message || 'Gagal mengirim request ke Supabase Edge Function',
+        errorName: err.name || 'NetworkError',
+        errorMessage: err.message,
+        recommendation: 'Pastikan koneksi internet stabil dan Edge Function news-search sudah dideploy.'
+      };
+      setErrorMessage(unreachable.message);
+      setErrorDetail(unreachable);
     } finally {
       setIsLoading(false);
     }
@@ -313,16 +452,41 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
 
       {/* 3. Global AI Search Box */}
       <section className="bg-[#FFFDF9] border-2.5 border-[#18181B] rounded-2xl p-5 sm:p-6 shadow-[4px_4px_0px_#18181B] space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-[#0096D6]" />
             <h2 className="font-display font-black text-base text-[#18181B] uppercase tracking-wide">
               SEARCH BERITA DENGAN AI (PEMAHAMAN INTENSI BAHASA ALAMI)
             </h2>
           </div>
-          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-800">
-            Sumber Web Asli & Terverifikasi
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleHealthCheck}
+              disabled={healthStatus === 'checking'}
+              title="Periksa koneksi ke Supabase Edge Function news-search"
+              className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition-all ${
+                healthStatus === 'online'
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-800'
+                  : healthStatus === 'offline'
+                  ? 'bg-rose-100 text-rose-900 border-rose-800'
+                  : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-400'
+              }`}
+            >
+              <Activity className={`w-3.5 h-3.5 ${healthStatus === 'checking' ? 'animate-spin text-[#0096D6]' : ''}`} />
+              <span>
+                {healthStatus === 'checking'
+                  ? 'Mengecek...'
+                  : healthStatus === 'online'
+                  ? 'Edge Function: ONLINE'
+                  : healthStatus === 'offline'
+                  ? 'Edge Function: OFFLINE'
+                  : 'Test Health'}
+              </span>
+            </button>
+            <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-800 hidden sm:inline-block">
+              Web Search Grounded
+            </span>
+          </div>
         </div>
 
         {/* Input Bar */}
@@ -577,26 +741,154 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* 5. Error & Empty State (Syarat 35 & 36) */}
-      {!isLoading && errorMessage && (
-        <div className="bg-[#FFFDF9] border-2.5 border-[#18181B] rounded-2xl p-10 text-center shadow-[4px_4px_0px_#18181B] space-y-3">
-          <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto" />
-          <h3 className="font-display font-black text-lg text-[#18181B]">
-            {errorMessage}
-          </h3>
-          <p className="text-xs font-mono text-neutral-600 max-w-md mx-auto">
-            Sistem tidak mengarang berita fiktif. Jika kata kunci spesifik tidak membuahkan hasil, coba gunakan kata kunci umum atau pilih preset populer di atas.
-          </p>
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedCategory('SEMUA');
-              handleSearch({ query: '', category: 'SEMUA' });
-            }}
-            className="px-5 py-2.5 bg-[#FFD166] text-[#18181B] font-display font-black text-xs rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B]"
-          >
-            LIHAT SEMUA BERITA TERKINI
-          </button>
+      {/* 5. Error & Empty State (Syarat 35, 36, dan Petunjuk Granular Error Handling) */}
+      {!isLoading && (errorMessage || errorDetail) && (
+        <div className="bg-[#FFFDF9] border-2.5 border-[#18181B] rounded-2xl p-6 sm:p-8 shadow-[4px_4px_0px_#18181B] space-y-5 text-left">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b-2 border-neutral-200 pb-4">
+            <div className="flex items-center gap-3">
+              {(() => {
+                const badge = getErrorCodeBadge(errorDetail?.code);
+                const IconComponent = badge.icon;
+                return (
+                  <div className={`p-2.5 rounded-xl ${badge.bg} ${badge.border} border-2`}>
+                    <IconComponent className={`w-6 h-6 ${badge.text}`} />
+                  </div>
+                );
+              })()}
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-[11px] font-black uppercase px-2 py-0.5 rounded bg-neutral-900 text-white tracking-wider">
+                    {errorDetail?.code || 'ERROR'}
+                  </span>
+                  {errorDetail?.responseStatus && (
+                    <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-900 border border-rose-800">
+                      HTTP {errorDetail.responseStatus}
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-display font-black text-lg sm:text-xl text-[#18181B] mt-1">
+                  {errorDetail?.title || errorMessage}
+                </h3>
+              </div>
+            </div>
+
+            <button
+              onClick={handleHealthCheck}
+              disabled={healthStatus === 'checking'}
+              className="px-3.5 py-1.5 rounded-lg border-2 border-[#18181B] bg-[#E0F7FA] hover:bg-[#B2EBF2] text-[#006064] text-xs font-mono font-bold shadow-[2px_2px_0px_#18181B] flex items-center gap-1.5 active:translate-y-[1px] transition-all self-start sm:self-auto flex-shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${healthStatus === 'checking' ? 'animate-spin' : ''}`} />
+              <span>{healthStatus === 'checking' ? 'Mengecek...' : 'Test Health Edge Function'}</span>
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-display font-semibold text-neutral-800 leading-relaxed">
+              {errorDetail?.message || errorMessage}
+            </p>
+
+            {errorDetail?.recommendation && (
+              <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-300 flex items-start gap-2.5 text-xs text-amber-950 font-mono">
+                <Info className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black uppercase tracking-wide">Rekomendasi Tindakan: </span>
+                  <span>{errorDetail.recommendation}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Jika Edge Function belum dideploy (HTTP 404), tampilkan perintah CLI Supabase */}
+            {errorDetail?.code === 'OMNIROUTE_NOT_FOUND' && errorDetail.responseStatus === 404 && (
+              <div className="p-4 bg-neutral-900 text-emerald-400 rounded-xl border-2 border-[#18181B] font-mono text-xs space-y-2">
+                <div className="flex items-center justify-between text-neutral-400 text-[11px] pb-1 border-b border-neutral-800">
+                  <span className="flex items-center gap-1.5">
+                    <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                    Perintah Deploy Edge Function (Supabase CLI)
+                  </span>
+                  <span className="text-neutral-500">Project: xrkmwovpxchjxmmdhtop</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 overflow-x-auto py-1">
+                  <code className="text-emerald-300 font-bold select-all">
+                    npx supabase functions deploy news-search --no-verify-jwt
+                  </code>
+                </div>
+              </div>
+            )}
+
+            {/* Technical Diagnostics Accordion */}
+            {(errorDetail?.errorName || errorDetail?.errorMessage || errorDetail?.responseBody) && (
+              <div className="border border-neutral-300 rounded-xl overflow-hidden bg-neutral-50 text-xs font-mono">
+                <button
+                  onClick={() => setShowTechDetails(!showTechDetails)}
+                  className="w-full px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Server className="w-3.5 h-3.5 text-neutral-600" />
+                    Detail Diagnostik Teknis (Error & Response)
+                  </span>
+                  {showTechDetails ? (
+                    <ChevronUp className="w-4 h-4 text-neutral-600" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-neutral-600" />
+                  )}
+                </button>
+
+                {showTechDetails && (
+                  <div className="p-4 space-y-2 text-neutral-700 bg-white border-t border-neutral-200 overflow-x-auto">
+                    {errorDetail.errorName && (
+                      <div>
+                        <span className="text-neutral-500 font-bold">Error Name: </span>
+                        <code className="px-1.5 py-0.5 bg-neutral-100 rounded text-neutral-900">{errorDetail.errorName}</code>
+                      </div>
+                    )}
+                    {errorDetail.errorMessage && (
+                      <div>
+                        <span className="text-neutral-500 font-bold">Error Message: </span>
+                        <span className="text-neutral-900">{errorDetail.errorMessage}</span>
+                      </div>
+                    )}
+                    {errorDetail.responseStatus && (
+                      <div>
+                        <span className="text-neutral-500 font-bold">HTTP Status: </span>
+                        <span className="font-bold text-rose-700">{errorDetail.responseStatus}</span>
+                      </div>
+                    )}
+                    {errorDetail.responseBody && (
+                      <div>
+                        <span className="text-neutral-500 font-bold block mb-1">Response Body:</span>
+                        <pre className="p-2.5 bg-neutral-900 text-neutral-200 rounded-lg text-[11px] overflow-x-auto">
+                          {typeof errorDetail.responseBody === 'object'
+                            ? JSON.stringify(errorDetail.responseBody, null, 2)
+                            : String(errorDetail.responseBody)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2.5 pt-2 border-t border-neutral-200">
+            <button
+              onClick={() => handleSearch()}
+              disabled={isLoading}
+              className="px-4 py-2 bg-[#FFD166] hover:bg-[#FFC633] text-[#18181B] font-display font-black text-xs rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] active:translate-y-[1px] transition-all flex items-center gap-1.5"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-[#18181B]" />
+              <span>Coba Lagi Pencarian Ini</span>
+            </button>
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('SEMUA');
+                handleSearch({ query: '', category: 'SEMUA' });
+              }}
+              className="px-4 py-2 bg-[#FAF8F5] hover:bg-white text-[#18181B] font-display font-bold text-xs rounded-xl border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] active:translate-y-[1px] transition-all"
+            >
+              Lihat Semua Berita Terkini
+            </button>
+          </div>
         </div>
       )}
 

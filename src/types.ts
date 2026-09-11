@@ -392,3 +392,24 @@ export interface FactCheckResult {
   officialSourceMatch?: string | null;
 }
 
+export type NewsErrorCode =
+  | 'EDGE_FUNCTION_UNREACHABLE'
+  | 'EDGE_FUNCTION_ERROR'
+  | 'OMNIROUTE_ERROR'
+  | 'OMNIROUTE_AUTH_ERROR'
+  | 'OMNIROUTE_NOT_FOUND'
+  | 'PROVIDER_ERROR'
+  | 'INVALID_AI_RESPONSE'
+  | 'NO_NEWS_FOUND';
+
+export interface NewsSearchErrorDetail {
+  code: NewsErrorCode;
+  title: string;
+  message: string;
+  errorName?: string;
+  errorMessage?: string;
+  responseStatus?: number;
+  responseBody?: any;
+  recommendation?: string;
+}
+
