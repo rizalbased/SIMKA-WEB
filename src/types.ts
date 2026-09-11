@@ -14,6 +14,7 @@ export interface AdminProfile {
 export type AdminTab = 
   | 'beranda'
   | 'media'
+  | 'berita'
   | 'board-display'
   | 'jadwal-les'
   | 'running-text'
@@ -278,3 +279,116 @@ export interface AnnouncementItem {
   iconName: string;
   timestamp: string;
 }
+
+// ==========================================
+// MODUL BERITA TERKINI (NEWS TYPES)
+// ==========================================
+
+export type NewsCategory =
+  | 'SEMUA'
+  | 'BENCANA'
+  | 'PENDIDIKAN'
+  | 'KEJUARAAN'
+  | 'PEKERJAAN'
+  | 'SEKOLAH'
+  | 'PEMERINTAHAN'
+  | 'EKONOMI'
+  | 'TEKNOLOGI'
+  | 'KESEHATAN'
+  | 'NASIONAL'
+  | 'INTERNASIONAL'
+  | 'OLAHRAGA'
+  | 'BUDAYA'
+  | 'LALU_LINTAS'
+  | 'PENGUMUMAN'
+  | 'LAINNYA';
+
+export type NewsVerificationStatus =
+  | 'SUMBER_KUAT'
+  | 'TERKONFIRMASI'
+  | 'PERLU_VERIFIKASI'
+  | 'SUMBER_TIDAK_MEMADAI';
+
+export type NewsSortOption =
+  | 'RELEVAN_TERBARU'
+  | 'TERBARU'
+  | 'PALING_RELEVAN'
+  | 'PALING_PENTING'
+  | 'SUMBER_TERKUAT';
+
+export type NewsDateRange =
+  | 'latest'
+  | 'today'
+  | '24h'
+  | '3d'
+  | '7d'
+  | '30d';
+
+export interface NewsJobDetails {
+  min_education?: string;
+  job_field?: string;
+  company?: string;
+  deadline?: string;
+}
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  summary: string;
+  ai_summary?: string;
+  category: NewsCategory;
+  country: string;
+  province?: string;
+  city?: string;
+  source_name: string;
+  source_domain?: string;
+  source_url: string;
+  image_url?: string | null;
+  published_at: string;
+  discovered_at?: string;
+  verification_status: NewsVerificationStatus;
+  confidence_score: number; // 0 - 100
+  cross_checked?: boolean;
+  related_sources?: { name: string; url: string; consistency: string }[];
+  job_details?: NewsJobDetails;
+}
+
+export interface NewsSearchParams {
+  query: string;
+  category?: NewsCategory | string;
+  country?: string;
+  province?: string;
+  city?: string;
+  dateRange?: NewsDateRange | string;
+  language?: string;
+  sort?: NewsSortOption;
+  minEducation?: string;
+  jobField?: string;
+  company?: string;
+  deadline?: string;
+}
+
+export interface AIQueryUnderstanding {
+  originalQuery: string;
+  interpretedTopic: string;
+  interpretedCategory?: NewsCategory;
+  interpretedLocation?: {
+    province?: string;
+    city?: string;
+  };
+  interpretedTime?: string;
+  targetAudience?: string;
+  expandedKeywords: string[];
+}
+
+export interface FactCheckResult {
+  articleId?: string;
+  title: string;
+  status: 'TERKONFIRMASI' | 'SEBAGIAN_TERKONFIRMASI' | 'PERLU_VERIFIKASI';
+  confidenceScore: number;
+  sourcesFound: { name: string; url: string; stance: 'mendukung' | 'netral' | 'meragukan' }[];
+  analysisNotes: string[];
+  claimVerification: string;
+  officialSourceMatch?: string | null;
+}
+

@@ -154,3 +154,30 @@ CREATE POLICY "Admins can manage categories" ON categories FOR ALL USING (
 CREATE POLICY "Admins can view admins" ON admins FOR SELECT USING (
     EXISTS (SELECT 1 FROM admins WHERE user_id = auth.uid() AND role = 'admin' AND is_active = true)
 );
+
+-- 10. Tabel News Articles (Modul Berita Terkini & Cache)
+CREATE TABLE IF NOT EXISTS news_articles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    summary TEXT,
+    category TEXT NOT NULL,
+    country TEXT DEFAULT 'Indonesia',
+    province TEXT,
+    city TEXT,
+    source_name TEXT NOT NULL,
+    source_domain TEXT,
+    source_url TEXT NOT NULL UNIQUE,
+    image_url TEXT,
+    published_at TIMESTAMPTZ,
+    discovered_at TIMESTAMPTZ DEFAULT NOW(),
+    verification_status TEXT DEFAULT 'SUMBER_KUAT',
+    confidence_score INTEGER DEFAULT 85,
+    ai_summary TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE news_articles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Access" ON news_articles;
+CREATE POLICY "Enable Access for All" ON news_articles FOR ALL USING (true) WITH CHECK (true);
+

@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   FolderKanban, 
+  Newspaper,
   Layers, 
   CalendarClock, 
   MessageSquareText, 
@@ -34,6 +35,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   const menuItems: { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string }[] = [
     { id: 'beranda', label: 'BERANDA', icon: LayoutDashboard },
     { id: 'media', label: 'MEDIA', icon: FolderKanban, badge: 'Media' },
+    { id: 'berita', label: 'BERITA TERKINI', icon: Newspaper, badge: 'Aktual' },
     { id: 'board-display', label: 'BOARD DISPLAY', icon: Layers, badge: `${totalSlidesCount} Slide` },
     { id: 'jadwal-les', label: 'JADWAL LES', icon: CalendarClock, badge: 'Realtime' },
     { id: 'running-text', label: 'RUNNING TEXT', icon: MessageSquareText, badge: 'Ticker' },

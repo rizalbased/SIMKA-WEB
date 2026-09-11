@@ -32,6 +32,7 @@ import { AdminBoardDisplay } from './components/admin/AdminBoardDisplay';
 import { AdminJadwalLes } from './components/admin/AdminJadwalLes';
 import { AdminRunningText } from './components/admin/AdminRunningText';
 import { AdminSettings } from './components/admin/AdminSettings';
+import { NewsSearch } from './components/admin/NewsSearch';
 import { Login } from './components/auth/Login';
 import { Loader2 } from 'lucide-react';
 
@@ -385,6 +386,10 @@ export default function App() {
               boards={boards}
               userRole={userProfile?.role || 'user'}
             />
+          )}
+
+          {activeTab === 'berita' && (
+            <NewsSearch userRole={userProfile?.role || 'user'} />
           )}
 
           {activeTab === 'board-display' && (
