@@ -36,6 +36,7 @@ import {
   ChevronUp,
   RefreshCw
 } from 'lucide-react';
+import { NewsHealthTest } from './NewsHealthTest';
 import { 
   NewsArticle, 
   NewsCategory, 
@@ -109,6 +110,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<NewsSearchErrorDetail | null>(null);
   const [showTechDetails, setShowTechDetails] = useState(false);
+  const [showHealthPanel, setShowHealthPanel] = useState(false);
   const [healthStatus, setHealthStatus] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle');
   const [healthResult, setHealthResult] = useState<any>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -132,6 +134,15 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           icon: WifiOff,
           label: 'EDGE_FUNCTION_UNREACHABLE'
         };
+      case 'EDGE_FUNCTION_HTTP_ERROR':
+      case 'EDGE_FUNCTION_ERROR':
+        return {
+          bg: 'bg-rose-100',
+          text: 'text-rose-900',
+          border: 'border-rose-800',
+          icon: AlertTriangle,
+          label: code === 'EDGE_FUNCTION_HTTP_ERROR' ? 'EDGE_FUNCTION_HTTP_ERROR' : 'EDGE_FUNCTION_ERROR'
+        };
       case 'OMNIROUTE_AUTH_ERROR':
         return {
           bg: 'bg-red-100',
@@ -139,6 +150,14 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           border: 'border-red-800',
           icon: Key,
           label: 'OMNIROUTE_AUTH_ERROR'
+        };
+      case 'OMNIROUTE_CONNECTION_ERROR':
+        return {
+          bg: 'bg-orange-100',
+          text: 'text-orange-900',
+          border: 'border-orange-800',
+          icon: Activity,
+          label: 'OMNIROUTE_CONNECTION_ERROR'
         };
       case 'OMNIROUTE_NOT_FOUND':
         return {
@@ -164,21 +183,14 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           icon: Activity,
           label: 'OMNIROUTE_ERROR'
         };
+      case 'INVALID_RESPONSE':
       case 'INVALID_AI_RESPONSE':
         return {
           bg: 'bg-fuchsia-100',
           text: 'text-fuchsia-900',
           border: 'border-fuchsia-800',
           icon: Terminal,
-          label: 'INVALID_AI_RESPONSE'
-        };
-      case 'EDGE_FUNCTION_ERROR':
-        return {
-          bg: 'bg-rose-100',
-          text: 'text-rose-900',
-          border: 'border-rose-800',
-          icon: AlertTriangle,
-          label: 'EDGE_FUNCTION_ERROR'
+          label: code === 'INVALID_RESPONSE' ? 'INVALID_RESPONSE' : 'INVALID_AI_RESPONSE'
         };
       case 'NO_NEWS_FOUND':
       default:
@@ -224,20 +236,35 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
       if (res.online) {
         setHealthStatus('online');
         setHealthResult(res.data);
-        showToast('✓ Edge Function news-search ONLINE & siap digunakan');
+        setErrorDetail(null);
+        setErrorMessage(null);
+        showToast('✓ EDGE_FUNCTION_ONLINE: Edge Function news-search aktif.');
       } else {
         setHealthStatus('offline');
         setHealthResult(res.error || res.data);
-        showToast('⚠ Edge Function news-search belum aktif / offline');
-        if (articles.length === 0 && res.error) {
+        if (res.error) {
           setErrorDetail(res.error);
           setErrorMessage(res.error.message);
+          showToast(`⚠ ${res.error.code}${res.error.responseStatus ? ` (HTTP ${res.error.responseStatus})` : ''}: ${res.error.message}`);
+        } else {
+          showToast('⚠ Gagal cek status Edge Function news-search');
         }
       }
     } catch (err: any) {
       setHealthStatus('offline');
       setHealthResult(err);
-      showToast('⚠ Gagal cek status Edge Function');
+      const detail: NewsSearchErrorDetail = {
+        code: 'EDGE_FUNCTION_UNREACHABLE',
+        functionName: 'news-search',
+        stage: 'health_check',
+        title: 'Edge Function Tidak Dapat Dihubungi',
+        message: err?.message || 'Gagal mengirim request ke Edge Function news-search',
+        errorName: err?.name,
+        errorMessage: err?.message
+      };
+      setErrorDetail(detail);
+      setErrorMessage(detail.message);
+      showToast(`⚠ EDGE_FUNCTION_UNREACHABLE: ${err?.message || 'Gagal terhubung'}`);
     }
   };
 
@@ -461,26 +488,25 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleHealthCheck}
-              disabled={healthStatus === 'checking'}
-              title="Periksa koneksi ke Supabase Edge Function news-search"
+              onClick={() => setShowHealthPanel(!showHealthPanel)}
+              title="Buka panel diagnostik & tombol TEST HEALTH EDGE FUNCTION"
               className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition-all ${
-                healthStatus === 'online'
+                showHealthPanel
+                  ? 'bg-[#0096D6] text-white border-[#18181B] shadow-[1px_1px_0px_#18181B]'
+                  : healthStatus === 'online'
                   ? 'bg-emerald-100 text-emerald-900 border-emerald-800'
                   : healthStatus === 'offline'
                   ? 'bg-rose-100 text-rose-900 border-rose-800'
                   : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border-neutral-400'
               }`}
             >
-              <Activity className={`w-3.5 h-3.5 ${healthStatus === 'checking' ? 'animate-spin text-[#0096D6]' : ''}`} />
+              <Activity className="w-3.5 h-3.5" />
               <span>
-                {healthStatus === 'checking'
-                  ? 'Mengecek...'
-                  : healthStatus === 'online'
+                {healthStatus === 'online'
                   ? 'Edge Function: ONLINE'
                   : healthStatus === 'offline'
                   ? 'Edge Function: OFFLINE'
-                  : 'Test Health'}
+                  : 'Panel Diagnostik'}
               </span>
             </button>
             <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-800 hidden sm:inline-block">
@@ -488,6 +514,17 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
             </span>
           </div>
         </div>
+
+        {/* Dedicated Health Test Component Panel */}
+        {showHealthPanel && (
+          <NewsHealthTest
+            onSuccess={() => {
+              setHealthStatus('online');
+              setErrorDetail(null);
+              setErrorMessage(null);
+            }}
+          />
+        )}
 
         {/* Input Bar */}
         <div className="flex flex-col sm:flex-row gap-2.5">
@@ -798,14 +835,14 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
             )}
 
             {/* Jika Edge Function belum dideploy (HTTP 404), tampilkan perintah CLI Supabase */}
-            {errorDetail?.code === 'OMNIROUTE_NOT_FOUND' && errorDetail.responseStatus === 404 && (
+            {((errorDetail?.code === 'EDGE_FUNCTION_HTTP_ERROR' || errorDetail?.code === 'OMNIROUTE_NOT_FOUND') && errorDetail.responseStatus === 404) && (
               <div className="p-4 bg-neutral-900 text-emerald-400 rounded-xl border-2 border-[#18181B] font-mono text-xs space-y-2">
                 <div className="flex items-center justify-between text-neutral-400 text-[11px] pb-1 border-b border-neutral-800">
                   <span className="flex items-center gap-1.5">
                     <Terminal className="w-3.5 h-3.5 text-emerald-400" />
                     Perintah Deploy Edge Function (Supabase CLI)
                   </span>
-                  <span className="text-neutral-500">Project: xrkmwovpxchjxmmdhtop</span>
+                  <span className="text-neutral-500">Function: news-search</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 overflow-x-auto py-1">
                   <code className="text-emerald-300 font-bold select-all">
@@ -816,7 +853,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
             )}
 
             {/* Technical Diagnostics Accordion */}
-            {(errorDetail?.errorName || errorDetail?.errorMessage || errorDetail?.responseBody) && (
+            {(errorDetail?.functionName || errorDetail?.stage || errorDetail?.errorName || errorDetail?.errorMessage || errorDetail?.responseBody) && (
               <div className="border border-neutral-300 rounded-xl overflow-hidden bg-neutral-50 text-xs font-mono">
                 <button
                   onClick={() => setShowTechDetails(!showTechDetails)}
@@ -824,7 +861,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
                 >
                   <span className="flex items-center gap-2">
                     <Server className="w-3.5 h-3.5 text-neutral-600" />
-                    Detail Diagnostik Teknis (Error & Response)
+                    Detail Diagnostik Teknis (Function, Stage, HTTP & Response)
                   </span>
                   {showTechDetails ? (
                     <ChevronUp className="w-4 h-4 text-neutral-600" />
@@ -835,6 +872,16 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
 
                 {showTechDetails && (
                   <div className="p-4 space-y-2 text-neutral-700 bg-white border-t border-neutral-200 overflow-x-auto">
+                    <div>
+                      <span className="text-neutral-500 font-bold">Function Name: </span>
+                      <code className="px-1.5 py-0.5 bg-neutral-100 rounded text-neutral-900 font-bold">{errorDetail.functionName || 'news-search'}</code>
+                    </div>
+                    {errorDetail.stage && (
+                      <div>
+                        <span className="text-neutral-500 font-bold">Tahap (Stage): </span>
+                        <code className="px-1.5 py-0.5 bg-neutral-100 rounded text-neutral-900">{errorDetail.stage}</code>
+                      </div>
+                    )}
                     {errorDetail.errorName && (
                       <div>
                         <span className="text-neutral-500 font-bold">Error Name: </span>
@@ -844,7 +891,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
                     {errorDetail.errorMessage && (
                       <div>
                         <span className="text-neutral-500 font-bold">Error Message: </span>
-                        <span className="text-neutral-900">{errorDetail.errorMessage}</span>
+                        <span className="text-neutral-900 font-medium">{errorDetail.errorMessage}</span>
                       </div>
                     )}
                     {errorDetail.responseStatus && (
@@ -856,7 +903,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
                     {errorDetail.responseBody && (
                       <div>
                         <span className="text-neutral-500 font-bold block mb-1">Response Body:</span>
-                        <pre className="p-2.5 bg-neutral-900 text-neutral-200 rounded-lg text-[11px] overflow-x-auto">
+                        <pre className="p-2.5 bg-neutral-900 text-neutral-200 rounded-lg text-[11px] overflow-x-auto font-mono">
                           {typeof errorDetail.responseBody === 'object'
                             ? JSON.stringify(errorDetail.responseBody, null, 2)
                             : String(errorDetail.responseBody)}

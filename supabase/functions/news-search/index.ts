@@ -11,7 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 interface SearchRequestBody {
@@ -56,6 +56,70 @@ function getCompletionsEndpoint(baseUrl: string): string {
 function getModelsEndpoint(baseUrl: string): string {
   const clean = normalizeBaseUrl(baseUrl);
   return `${clean}/models`;
+}
+
+/**
+ * Ekstraksi konten teks dari response OmniRoute
+ * Mendukung response JSON standar (stream=false) dan fallback Server-Sent Events (SSE / text/event-stream)
+ */
+async function extractOmniRouteContent(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  // 1. Deteksi apakah response berbentuk Server-Sent Events (SSE)
+  const isSse = contentType.includes("text/event-stream") || rawText.trim().startsWith("data:") || rawText.includes("\ndata:");
+
+  if (isSse) {
+    console.log("[EdgeFunction news-search] Mendeteksi streaming response (SSE) dari OmniRoute. Memulai parsing chunks...");
+    let accumulatedContent = "";
+    const lines = rawText.split("\n");
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(":") || trimmed === "data: [DONE]" || trimmed === "data:[DONE]") {
+        continue;
+      }
+      if (trimmed.startsWith("data:")) {
+        const jsonStr = trimmed.slice(5).trim();
+        if (!jsonStr || jsonStr === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(jsonStr);
+          const delta = chunk.choices?.[0]?.delta?.content 
+            ?? chunk.choices?.[0]?.delta?.text 
+            ?? chunk.choices?.[0]?.text
+            ?? chunk.choices?.[0]?.message?.content
+            ?? "";
+          if (delta) {
+            accumulatedContent += delta;
+          }
+        } catch {
+          // Lewati chunk yang tidak lengkap
+        }
+      }
+    }
+
+    if (accumulatedContent.trim()) {
+      return accumulatedContent.trim();
+    }
+  }
+
+  // 2. Response JSON standar (stream=false)
+  try {
+    const data = JSON.parse(rawText);
+    const content = data.choices?.[0]?.message?.content
+      ?? data.choices?.[0]?.delta?.content
+      ?? data.choices?.[0]?.text
+      ?? data.content
+      ?? data.response
+      ?? "";
+    if (content) {
+      return content;
+    }
+  } catch {
+    // Jika bukan JSON pembungkus standar, kemungkinan rawText adalah string langsung
+  }
+
+  return rawText.trim();
 }
 
 /**
@@ -120,11 +184,12 @@ async function resolveOmniRouteModel(baseUrl: string, apiKey: string): Promise<s
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
-  // 9. Endpoint Health Check (GET atau action === 'health')
-  if (req.method === "GET") {
+  // Health check: GET /functions/v1/news-search?health=1 atau request GET apapun
+  const reqUrl = new URL(req.url);
+  if (req.method === "GET" || reqUrl.searchParams.get("health") === "1") {
     return new Response(
       JSON.stringify({
         success: true,
@@ -139,10 +204,10 @@ serve(async (req) => {
   }
 
   try {
-    const body: SearchRequestBody = await req.json();
+    const body: SearchRequestBody & { health?: number | string | boolean } = await req.json().catch(() => ({}));
     const action = body.action || 'search';
 
-    if (action === 'health') {
+    if (action === 'health' || body.health === 1 || body.health === '1' || body.health === true) {
       return new Response(
         JSON.stringify({
           success: true,
@@ -164,9 +229,10 @@ serve(async (req) => {
 
     const omnirouteApiKey = Deno.env.get("OMNIROUTE_API_KEY") || "";
 
-    // Logging development (JANGAN LOG API KEY!)
-    console.log(`[EdgeFunction news-search] query user: "${body.query || ''}"`);
-    console.log(`[EdgeFunction news-search] intent hasil AI (kategori): "${body.category || 'SEMUA'}"`);
+    // Logging development persis sesuai instruksi (JANGAN LOG API KEY!)
+    console.log("[NEWS_SEARCH] request received");
+    console.log(`[NEWS_SEARCH] query: ${body.query || '(kosong)'}`);
+    console.log(`[NEWS_SEARCH] intent: ${body.category || 'SEMUA'}`);
     console.log(`[EdgeFunction news-search] OMNIROUTE_BASE_URL yang digunakan: ${omnirouteBaseUrl}`);
     console.log(`[EdgeFunction news-search] API Key terkonfigurasi: ${omnirouteApiKey ? 'YA' : 'TIDAK'}`);
 
@@ -245,7 +311,7 @@ serve(async (req) => {
  */
 async function handleOmniRouteSearch(params: SearchRequestBody, config: OmniRouteConfig) {
   const endpoint = getCompletionsEndpoint(config.baseUrl);
-  console.log(`[EdgeFunction news-search] endpoint yang dipanggil: ${endpoint}`);
+  console.log(`[NEWS_SEARCH] OmniRoute URL: ${endpoint}`);
 
   // Tentukan model yang tersedia tanpa meminta OMNIROUTE_MODEL
   const selectedModel = await resolveOmniRouteModel(config.baseUrl, config.apiKey);
@@ -306,22 +372,23 @@ Format objek artikel:
       headers: {
         "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
+        "Accept": "application/json",
         "HTTP-Referer": "https://simka-signage.internal",
         "X-Title": "SIMKA Digital Signage"
       },
       body: JSON.stringify({
         model: selectedModel,
         stream: false,
+        temperature: 0.2,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Cari dan kurasi 6 artikel berita web aktual Indonesia mengenai: "${actualSearchQuery}". Kategori: "${params.category || 'SEMUA'}". Wilayah: "${locationStr}".` }
         ],
-        web_search: true,
-        temperature: 0.2
+        web_search: true
       })
     });
 
-    console.log(`[EdgeFunction news-search] HTTP status: ${response.status}`);
+    console.log(`[NEWS_SEARCH] OmniRoute HTTP status: ${response.status}`);
 
     if (!response.ok) {
       const errText = await response.text();
@@ -364,8 +431,7 @@ Format objek artikel:
       };
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    const content = await extractOmniRouteContent(response);
 
     if (!content) {
       console.error("[EdgeFunction news-search] response error: Response OmniRoute tidak valid (konten kosong)");
@@ -495,6 +561,7 @@ Format objek artikel:
       console.warn("[EdgeFunction news-search] Database save exception:", dbEx?.message);
     }
 
+    console.log(`[NEWS_SEARCH] result count: ${validArticles.length}`);
     console.log(`[EdgeFunction news-search] jumlah berita yang disimpan: ${savedCount}`);
 
     return {
@@ -555,20 +622,20 @@ Format output JSON murni:
       method: "POST",
       headers: {
         "Authorization": `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
       },
       body: JSON.stringify({
         model: selectedModel,
         stream: false,
+        temperature: 0.1,
         messages: [{ role: "user", content: prompt }],
-        web_search: true,
-        temperature: 0.1
+        web_search: true
       })
     });
 
     if (response.ok) {
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content;
+      const content = await extractOmniRouteContent(response);
       if (content) {
         let cleaned = content.replace(/```json/gi, '').replace(/```/g, '').trim();
         const objMatch = cleaned.match(/\{[\s\S]*\}/);

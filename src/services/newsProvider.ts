@@ -330,17 +330,17 @@ export class PublicVerifiedRssProvider implements NewsProvider {
 }
 
 /**
- * Klasifikasi detail error pencarian berita sesuai 8 kategori:
- * EDGE_FUNCTION_UNREACHABLE, EDGE_FUNCTION_ERROR, OMNIROUTE_ERROR,
- * OMNIROUTE_AUTH_ERROR, OMNIROUTE_NOT_FOUND, PROVIDER_ERROR,
- * INVALID_AI_RESPONSE, NO_NEWS_FOUND
+ * Klasifikasi detail error pencarian berita sesuai 7 kategori:
+ * EDGE_FUNCTION_UNREACHABLE, EDGE_FUNCTION_HTTP_ERROR, OMNIROUTE_ERROR,
+ * OMNIROUTE_AUTH_ERROR, OMNIROUTE_CONNECTION_ERROR, INVALID_RESPONSE, NO_NEWS_FOUND
  */
 export function classifyNewsError(
   error: any,
   data: any,
   articlesCount: number,
   statusOverride?: number,
-  bodyOverride?: any
+  bodyOverride?: any,
+  stageOverride?: string
 ): NewsSearchErrorDetail | null {
   if (articlesCount > 0) return null;
 
@@ -359,67 +359,141 @@ export function classifyNewsError(
     if (typeof data.status === 'number') {
       responseStatus = responseStatus || data.status;
     }
-    if (data.error || data.message) {
+    if (data.error || data.message || data.code) {
       responseBody = responseBody || data;
     }
   }
 
-  const errString = `${errorMessage} ${JSON.stringify(responseBody || {})} ${errorName}`.toLowerCase();
+  const errString = `${errorMessage} ${typeof responseBody === 'object' ? JSON.stringify(responseBody) : responseBody || ''} ${errorName}`.toLowerCase();
 
   // 1. OMNIROUTE_AUTH_ERROR (HTTP 401 / OMNIROUTE_API_KEY tidak valid)
   if (
     responseStatus === 401 ||
     responseBody?.status === 401 ||
+    responseBody?.code === 'OMNIROUTE_AUTH_ERROR' ||
     responseBody?.error?.toLowerCase().includes('api key') ||
     errString.includes('omniroute api key tidak valid') ||
+    errString.includes('omniroute_api_key belum dikonfigurasi') ||
     errString.includes('unauthorized') ||
     errString.includes('401')
   ) {
     return {
       code: 'OMNIROUTE_AUTH_ERROR',
+      functionName: 'news-search',
+      stage: stageOverride || 'omniroute_auth',
       title: 'Autentikasi OmniRoute Gagal (HTTP 401)',
-      message: responseBody?.error || 'OmniRoute API key tidak valid atau belum dikonfigurasi.',
+      message: responseBody?.error || 'OmniRoute API key tidak valid atau belum dikonfigurasi pada Supabase Secrets.',
       errorName: errorName || 'OmniRouteAuthError',
-      errorMessage: errorMessage || 'OmniRoute API key tidak valid',
+      errorMessage: errorMessage || 'OmniRoute API key unauthorized (401)',
       responseStatus: 401,
       responseBody,
-      recommendation: 'Periksa secret OMNIROUTE_API_KEY pada Supabase Edge Function atau environment server.'
+      recommendation: 'Periksa secret OMNIROUTE_API_KEY pada Supabase Edge Function Secrets.'
     };
   }
 
-  // 2. OMNIROUTE_NOT_FOUND (HTTP 404 / Edge Function news-search belum di-deploy atau endpoint 404)
-  const is404 =
-    responseStatus === 404 ||
-    responseBody?.status === 404 ||
+  // 2. OMNIROUTE_CONNECTION_ERROR (Cloudflare tunnel down / connection timeout / ECONNREFUSED)
+  if (
+    responseBody?.stage === 'omniroute_connection' ||
+    responseBody?.code === 'OMNIROUTE_CONNECTION_ERROR' ||
+    errString.includes('cloudflare') ||
+    errString.includes('econnrefused') ||
+    errString.includes('connection refused') ||
+    errString.includes('tunnel') ||
+    errString.includes('omniroute tidak dapat dihubungi') ||
+    ((responseStatus === 502 || responseStatus === 503 || responseStatus === 504) && responseBody?.stage === 'provider')
+  ) {
+    return {
+      code: 'OMNIROUTE_CONNECTION_ERROR',
+      functionName: 'news-search',
+      stage: stageOverride || 'omniroute_connection',
+      title: `Koneksi OmniRoute Bermasalah (HTTP ${responseStatus || 502})`,
+      message: responseBody?.error || 'Edge Function tidak dapat terhubung ke endpoint OmniRoute atau Cloudflare Tunnel sedang offline.',
+      errorName: errorName || 'OmniRouteConnectionError',
+      errorMessage: errorMessage || 'Koneksi ke OmniRoute gagal',
+      responseStatus: responseStatus || 502,
+      responseBody,
+      recommendation: 'Pastikan Cloudflare Quick Tunnel aktif di komputer lokal Anda dan URL OMNIROUTE_BASE_URL dapat diakses publik.'
+    };
+  }
+
+  // 3. OMNIROUTE_ERROR (Error dari OmniRoute atau konfigurasi Base URL)
+  if (
+    responseBody?.stage === 'omniroute' ||
+    responseBody?.stage === 'configuration' ||
+    responseBody?.code === 'OMNIROUTE_ERROR' ||
+    errString.includes('omniroute_base_url') ||
+    errString.includes('omniroute endpoint tidak ditemukan')
+  ) {
+    return {
+      code: 'OMNIROUTE_ERROR',
+      functionName: 'news-search',
+      stage: stageOverride || 'omniroute',
+      title: `Error Dari OmniRoute AI Gateway (HTTP ${responseStatus || 500})`,
+      message: responseBody?.error || 'Terjadi kesalahan pada OmniRoute AI Gateway atau konfigurasi OMNIROUTE_BASE_URL.',
+      errorName: errorName || 'OmniRouteError',
+      errorMessage: errorMessage || responseBody?.error || 'OmniRoute error',
+      responseStatus: responseStatus || responseBody?.status || 500,
+      responseBody,
+      recommendation: 'Periksa log pada terminal komputer OmniRoute dan pastikan endpoint /chat/completions valid.'
+    };
+  }
+
+  // 4. INVALID_RESPONSE (Format response AI bukan JSON valid atau kosong)
+  if (
+    responseBody?.code === 'INVALID_RESPONSE' ||
+    errString.includes('response omniroute tidak valid') ||
+    errString.includes('invalid json') ||
+    errString.includes('unexpected token') ||
+    errString.includes('tidak valid json') ||
+    (data && data.success === false && errString.includes('tidak valid'))
+  ) {
+    return {
+      code: 'INVALID_RESPONSE',
+      functionName: 'news-search',
+      stage: stageOverride || 'parse_response',
+      title: 'Response AI / OmniRoute Tidak Valid',
+      message: responseBody?.error || 'Output dari model AI tidak dapat diurai menjadi daftar artikel berita JSON yang valid.',
+      errorName: errorName || 'InvalidResponseError',
+      errorMessage: errorMessage || 'Response OmniRoute tidak valid',
+      responseStatus: responseStatus || 500,
+      responseBody,
+      recommendation: 'Pastikan model AI yang digunakan di OmniRoute mendukung output instruksi terstruktur (JSON).'
+    };
+  }
+
+  // 5. EDGE_FUNCTION_HTTP_ERROR (HTTP 4xx / 5xx dari Supabase Edge runtime)
+  const isHttpError =
+    (typeof responseStatus === 'number' && responseStatus >= 400) ||
+    errorName === 'FunctionsHttpError' ||
     responseBody?.code === 'NOT_FOUND' ||
     errString.includes('requested function was not found') ||
-    errString.includes('endpoint atau model tidak ditemukan') ||
-    errString.includes('404 not found') ||
-    errString.includes('tidak ditemukan');
+    errString.includes('non-2xx status code');
 
-  if (is404) {
-    const isEdgeFunctionMissing =
+  if (isHttpError) {
+    const is404 =
+      responseStatus === 404 ||
       responseBody?.code === 'NOT_FOUND' ||
-      errString.includes('requested function was not found') ||
-      responseStatus === 404;
+      errString.includes('requested function was not found');
 
     return {
-      code: 'OMNIROUTE_NOT_FOUND',
-      title: isEdgeFunctionMissing ? 'Edge Function Belum Tersedia (HTTP 404)' : 'Endpoint OmniRoute Tidak Ditemukan (HTTP 404)',
-      message: isEdgeFunctionMissing
-        ? "Function 'news-search' belum di-deploy ke Supabase project (xrkmwovpxchjxmmdhtop)."
-        : (responseBody?.error || 'Endpoint atau model tidak ditemukan pada OMNIROUTE_BASE_URL.'),
+      code: 'EDGE_FUNCTION_HTTP_ERROR',
+      functionName: 'news-search',
+      stage: stageOverride || 'edge_gateway',
+      title: is404 ? 'Edge Function news-search Tidak Ditemukan (HTTP 404)' : `Edge Function Error (HTTP ${responseStatus || 500})`,
+      message: is404
+        ? "Edge Function 'news-search' mengembalikan status 404 Not Found pada project Supabase."
+        : (responseBody?.error || responseBody?.message || errorMessage || `Edge Function mengembalikan status HTTP ${responseStatus}`),
       errorName: errorName || 'FunctionsHttpError',
-      errorMessage: errorMessage || 'HTTP 404: Requested function was not found',
-      responseStatus: 404,
+      errorMessage: errorMessage || (is404 ? 'HTTP 404: Requested function was not found' : `Edge Function HTTP ${responseStatus}`),
+      responseStatus: responseStatus || (is404 ? 404 : 500),
       responseBody,
-      recommendation: isEdgeFunctionMissing
-        ? 'Jalankan deployment Edge Function: npx supabase functions deploy news-search --no-verify-jwt'
-        : 'Periksa nilai OMNIROUTE_BASE_URL dan pastikan route /chat/completions valid.'
+      recommendation: is404
+        ? "Pastikan Edge Function dengan nama persis 'news-search' telah di-deploy ke Supabase project."
+        : 'Periksa log eksekusi Edge Function news-search di dashboard Supabase.'
     };
   }
 
-  // 3. EDGE_FUNCTION_UNREACHABLE (Network Error, CORS preflight fail, FunctionsFetchError)
+  // 6. EDGE_FUNCTION_UNREACHABLE (Network Failure / CORS Preflight Error)
   if (
     errorName === 'FunctionsFetchError' ||
     errString.includes('failed to send request') ||
@@ -430,96 +504,43 @@ export function classifyNewsError(
   ) {
     return {
       code: 'EDGE_FUNCTION_UNREACHABLE',
+      functionName: 'news-search',
+      stage: stageOverride || 'network_or_cors',
       title: 'Edge Function Tidak Dapat Dihubungi',
-      message: 'Gagal mengirim request ke Supabase Edge Function (Network / CORS Preflight Error).',
+      message: 'Koneksi jaringan atau CORS preflight ke Supabase Edge Function gagal.',
       errorName: errorName || 'FunctionsFetchError',
       errorMessage: errorMessage || 'Failed to send request to the Edge Function',
       responseStatus,
       responseBody,
-      recommendation: 'Pastikan koneksi internet stabil, Edge Function aktif, dan header CORS mengizinkan preflight OPTIONS.'
+      recommendation: 'Periksa koneksi internet dan pastikan Edge Function menangani preflight OPTIONS dengan benar.'
     };
   }
 
-  // 4. PROVIDER_ERROR (HTTP 503/504 / stage === 'provider')
-  if (
-    responseStatus === 503 ||
-    responseStatus === 504 ||
-    responseBody?.stage === 'provider' ||
-    errString.includes('provider ai tidak tersedia') ||
-    errString.includes('provider error')
-  ) {
-    return {
-      code: 'PROVIDER_ERROR',
-      title: `Provider AI Tidak Tersedia (HTTP ${responseStatus || 503})`,
-      message: responseBody?.error || 'Provider model AI upstream pada OmniRoute sedang offline atau mengalami gangguan.',
-      errorName: errorName || 'ProviderError',
-      errorMessage: errorMessage || 'Provider AI tidak tersedia',
-      responseStatus: responseStatus || 503,
-      responseBody,
-      recommendation: 'Coba beberapa saat lagi atau beralih ke provider AI aktif lainnya di OmniRoute.'
-    };
-  }
-
-  // 5. OMNIROUTE_ERROR (Konfigurasi URL kosong atau error OmniRoute)
-  if (
-    responseBody?.stage === 'configuration' ||
-    errString.includes('omniroute_base_url') ||
-    errString.includes('omniroute_api_key belum dikonfigurasi') ||
-    responseBody?.stage === 'omniroute' ||
-    errString.includes('omniroute tidak dapat dihubungi')
-  ) {
-    return {
-      code: 'OMNIROUTE_ERROR',
-      title: 'Konfigurasi OmniRoute Bermasalah',
-      message: responseBody?.error || 'Terjadi kesalahan konfigurasi atau komunikasi dengan OmniRoute AI Gateway.',
-      errorName: errorName || 'OmniRouteConfigError',
-      errorMessage: errorMessage || responseBody?.error || 'OmniRoute error',
-      responseStatus: responseStatus || responseBody?.status || 500,
-      responseBody,
-      recommendation: 'Pastikan OMNIROUTE_BASE_URL dan OMNIROUTE_API_KEY telah dikonfigurasi di secrets Supabase.'
-    };
-  }
-
-  // 6. INVALID_AI_RESPONSE (Format response JSON rusak atau konten kosong)
-  if (
-    errString.includes('response omniroute tidak valid') ||
-    errString.includes('invalid json') ||
-    errString.includes('unexpected token') ||
-    (data && data.success === false && errString.includes('tidak valid'))
-  ) {
-    return {
-      code: 'INVALID_AI_RESPONSE',
-      title: 'Response AI Tidak Valid',
-      message: responseBody?.error || 'Output dari model AI tidak dapat diurai menjadi daftar berita JSON yang valid.',
-      errorName: errorName || 'InvalidAiResponseError',
-      errorMessage: errorMessage || 'Response OmniRoute tidak valid.',
-      responseStatus: responseStatus || 500,
-      responseBody,
-      recommendation: 'Pastikan prompt menghasilkan JSON array murni tanpa format markdown tambahan.'
-    };
-  }
-
-  // 7. EDGE_FUNCTION_ERROR (Internal Edge Function Error)
+  // 7. General internal Edge Function error
   if (error || (data && data.success === false)) {
     return {
-      code: 'EDGE_FUNCTION_ERROR',
+      code: 'EDGE_FUNCTION_HTTP_ERROR',
+      functionName: 'news-search',
+      stage: stageOverride || 'edge_function_internal',
       title: `Error Pada Edge Function (HTTP ${responseStatus || 500})`,
       message: responseBody?.error || responseBody?.message || errorMessage || 'Edge Function mengembalikan status error.',
       errorName: errorName || 'FunctionsHttpError',
-      errorMessage: errorMessage || 'Edge Function returned a non-2xx status code',
+      errorMessage: errorMessage || 'Edge Function returned error',
       responseStatus: responseStatus || 500,
       responseBody,
-      recommendation: 'Buka dashboard Supabase > Edge Functions > news-search > Logs untuk meninjau error log.'
+      recommendation: 'Buka dashboard Supabase > Edge Functions > news-search > Logs untuk meninjau log error.'
     };
   }
 
-  // 8. NO_NEWS_FOUND
+  // 8. NO_NEWS_FOUND (Pencarian berhasil tapi 0 berita ditemukan)
   if (articlesCount === 0) {
     return {
       code: 'NO_NEWS_FOUND',
+      functionName: 'news-search',
+      stage: stageOverride || 'news_results',
       title: 'Tidak Ada Berita Ditemukan',
-      message: 'Pencarian AI tidak menemukan artikel berita yang cocok dengan kata kunci atau filter ini.',
-      recommendation: 'Gunakan kata kunci yang lebih umum atau gunakan preset topik populer.'
+      message: 'Pencarian AI tidak menemukan artikel berita yang cocok dengan kata kunci ini.',
+      recommendation: 'Gunakan kata kunci pencarian yang lebih umum atau coba preset kategori di atas.'
     };
   }
 
@@ -535,47 +556,61 @@ export async function testEdgeFunctionHealth(): Promise<{
   data?: any;
   error?: NewsSearchErrorDetail;
 }> {
-  console.log('[SIMKA BERITA] Menjalankan test health Edge Function news-search...');
+  console.log('[SIMKA BERITA] Menjalankan test health Edge Function news-search dengan body: { health: true }...');
   try {
-    const { data, error } = await supabase.functions.invoke('news-search', {
-      body: { action: 'health' }
+    // Gunakan supabase.functions.invoke standard dengan auth header otomatis
+    const res = await supabase.functions.invoke('news-search', {
+      body: { health: true }
     });
 
-    if (!error && data && data.success === true && data.status === 'online') {
-      console.log('[SIMKA BERITA] Test health berhasil: Edge Function online');
+    const { data, error, response } = res;
+
+    if (!error && data && (data.success === true || data.status === 'online')) {
+      console.log('[SIMKA BERITA] Test health berhasil: EDGE_FUNCTION_ONLINE');
       return {
         online: true,
-        data
+        data: {
+          success: true,
+          service: 'news-search',
+          status: 'online',
+          ...data
+        }
       };
     }
 
-    let status: number | undefined;
+    // Ekstraksi response status dan response body HTTP sebenarnya
+    let status: number | undefined = undefined;
     let body: any = undefined;
-    if (error?.context) {
-      if (typeof error.context.status === 'number') status = error.context.status;
-      if (typeof error.context.clone === 'function') {
+
+    const resp = response || (error?.context instanceof Response ? error.context : undefined);
+    if (resp) {
+      status = resp.status;
+      try {
+        body = await resp.clone().json();
+      } catch {
         try {
-          body = await error.context.clone().json();
-        } catch {
-          try {
-            body = await error.context.clone().text();
-          } catch {}
-        }
+          body = await resp.clone().text();
+        } catch {}
       }
+    } else if (error?.context && typeof error.context.status === 'number') {
+      status = error.context.status;
     }
 
-    const detail = classifyNewsError(error, data, 0, status, body);
+    const detail = classifyNewsError(error, data, 0, status, body, 'health_check');
     return {
       online: false,
       data,
       error: detail || {
-        code: 'EDGE_FUNCTION_ERROR',
-        title: 'Health Check Gagal',
-        message: error?.message || 'Edge Function tidak merespon status online.',
+        code: 'EDGE_FUNCTION_HTTP_ERROR',
+        functionName: 'news-search',
+        stage: 'health_check',
+        title: `Health Check Gagal (HTTP ${status || 500})`,
+        message: error?.message || 'Edge Function news-search tidak mengembalikan status online.',
         errorName: error?.name,
         errorMessage: error?.message,
         responseStatus: status,
-        responseBody: body
+        responseBody: body,
+        recommendation: 'Periksa status Edge Function news-search di dashboard Supabase.'
       }
     };
   } catch (err: any) {
@@ -583,10 +618,13 @@ export async function testEdgeFunctionHealth(): Promise<{
       online: false,
       error: {
         code: 'EDGE_FUNCTION_UNREACHABLE',
+        functionName: 'news-search',
+        stage: 'health_check',
         title: 'Edge Function Tidak Dapat Dihubungi',
         message: err?.message || 'Gagal mengirim request health test ke Supabase Edge Function.',
         errorName: err?.name || 'NetworkError',
-        errorMessage: err?.message
+        errorMessage: err?.message,
+        recommendation: 'Periksa koneksi jaringan dan pastikan domain project Supabase dapat diakses.'
       }
     };
   }

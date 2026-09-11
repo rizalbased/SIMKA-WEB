@@ -1,14 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 if (!supabaseUrl) {
   console.error('VITE_SUPABASE_URL belum dikonfigurasi.');
 }
 
 if (!supabaseKey) {
-  console.error('Supabase publishable/anon key belum dikonfigurasi.');
+  console.error('VITE_SUPABASE_ANON_KEY belum dikonfigurasi.');
 }
 
 export const isSupabaseConfigured = () => {
