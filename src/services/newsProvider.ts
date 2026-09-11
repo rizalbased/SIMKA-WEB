@@ -375,14 +375,30 @@ export function classifyNewsError(
     return {
       code: 'EDGE_FUNCTION_HTTP_ERROR',
       functionName: 'news-search',
-      stage: 'request_validation',
+      stage: responseBody?.stage || 'request',
       title: 'Kata Kunci Belum Diisi',
       message: 'Masukkan kata kunci berita terlebih dahulu.',
       errorName: 'QueryRequiredError',
-      errorMessage: 'Query pencarian berita wajib diisi.',
-      responseStatus: 400,
+      errorMessage: responseBody?.error || 'Query pencarian berita wajib diisi.',
+      responseStatus: responseStatus || 400,
       responseBody,
       recommendation: 'Ketik topik atau kata kunci berita yang ingin dicari (contoh: KORUPSI, berita terkini Sumatera Utara Medan).'
+    };
+  }
+
+  // 0.1 Respons Terstruktur Gagal dari Edge Function { success: false, stage, code, error }
+  if (responseBody && typeof responseBody === 'object' && responseBody.success === false) {
+    return {
+      code: responseBody.code || 'EDGE_FUNCTION_HTTP_ERROR',
+      functionName: 'news-search',
+      stage: responseBody.stage || stageOverride || 'edge_function',
+      title: responseBody.code ? `${responseBody.code} (HTTP ${responseStatus || 400})` : `Error Edge Function (HTTP ${responseStatus || 400})`,
+      message: responseBody.error || responseBody.message || 'Edge Function mengembalikan status error.',
+      errorName: errorName || responseBody.code || 'FunctionsError',
+      errorMessage: responseBody.error || responseBody.message || errorMessage || 'Edge Function returned error',
+      responseStatus: responseStatus || 400,
+      responseBody,
+      recommendation: 'Periksa stage dan code error pada panel diagnostik teknis.'
     };
   }
 
@@ -747,8 +763,8 @@ export class OmniRouteNewsProvider implements NewsProvider {
       }
     }
 
-    // Jika Edge Function sukses mengembalikan artikel
-    if (!error && data && Array.isArray(data.articles) && data.articles.length > 0) {
+    // Jika Edge Function sukses mengembalikan respons (success === true)
+    if (!error && data && data.success === true && Array.isArray(data.articles)) {
       console.log('[SIMKA BERITA] 4. Status HTTP: 200 (Supabase Edge Function)');
       console.log('[SIMKA BERITA] 5. Jumlah berita yang diterima:', data.articles.length);
       return {

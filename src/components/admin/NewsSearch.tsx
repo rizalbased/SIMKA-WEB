@@ -324,14 +324,10 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           errorMessage: result.error
         });
       } else {
-        const notFound: NewsSearchErrorDetail = {
-          code: 'NO_NEWS_FOUND',
-          title: 'Berita Tidak Ditemukan',
-          message: 'Pencarian AI tidak menemukan artikel berita yang cocok dengan kriteria ini.',
-          recommendation: 'Coba gunakan kata kunci yang lebih umum atau pilih preset kategori berita di atas.'
-        };
-        setErrorMessage(notFound.message);
-        setErrorDetail(notFound);
+        // success === true dan count === 0 (tidak dianggap error)
+        setArticles([]);
+        setErrorMessage(null);
+        setErrorDetail(null);
       }
     } catch (err: any) {
       console.error('[SIMKA BERITA] Search error:', err);
@@ -957,7 +953,22 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* 6. Daftar Hasil Pencarian Berita (Syarat 15: Kartu Berita Neo-Brutalism) */}
+      {/* 6. Pesan Jika Tidak Ditemukan Berita (success === true, count === 0) */}
+      {!isLoading && !errorMessage && !errorDetail && articles.length === 0 && (
+        <div className="bg-[#FFFDF9] border-2.5 border-[#18181B] rounded-2xl p-8 sm:p-12 text-center shadow-[4px_4px_0px_#18181B] space-y-3">
+          <div className="w-12 h-12 bg-neutral-100 border-2 border-[#18181B] rounded-2xl flex items-center justify-center mx-auto text-neutral-600 shadow-[2px_2px_0px_#18181B]">
+            <Search className="w-6 h-6" />
+          </div>
+          <h3 className="font-display font-black text-lg text-[#18181B]">
+            Tidak ditemukan berita yang memenuhi kriteria.
+          </h3>
+          <p className="text-neutral-600 text-xs font-mono max-w-md mx-auto">
+            Coba gunakan kata kunci pencarian yang lebih umum atau pilih salah satu preset kategori di atas.
+          </p>
+        </div>
+      )}
+
+      {/* 7. Daftar Hasil Pencarian Berita (Syarat 15: Kartu Berita Neo-Brutalism) */}
       {!isLoading && !errorMessage && articles.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
