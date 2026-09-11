@@ -269,6 +269,24 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   };
 
   const handleSearch = async (customParams?: Partial<NewsSearchParams>) => {
+    const rawQuery = customParams?.query !== undefined ? customParams.query : searchQuery;
+    const finalQuery = (rawQuery || '').trim();
+
+    // Jangan kirim query kosong ke Edge Function
+    if (!finalQuery) {
+      showToast('Masukkan kata kunci berita terlebih dahulu.');
+      setErrorMessage('Masukkan kata kunci berita terlebih dahulu.');
+      setErrorDetail({
+        code: 'EDGE_FUNCTION_HTTP_ERROR',
+        functionName: 'news-search',
+        stage: 'request_validation',
+        title: 'Kata Kunci Belum Diisi',
+        message: 'Masukkan kata kunci berita terlebih dahulu.',
+        recommendation: 'Ketik topik atau kata kunci pencarian (misal: "KORUPSI", "berita terkini Sumatera Utara Medan").'
+      });
+      return;
+    }
+
     setIsLoading(true);
     setErrorMessage(null);
     setErrorDetail(null);
@@ -276,7 +294,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
 
     try {
       const params: NewsSearchParams = {
-        query: customParams?.query !== undefined ? customParams.query : searchQuery,
+        query: finalQuery,
         category: customParams?.category !== undefined ? customParams.category : selectedCategory,
         country: selectedCountry,
         province: customParams?.province !== undefined ? customParams.province : selectedProvince,
@@ -317,16 +335,16 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
       }
     } catch (err: any) {
       console.error('[SIMKA BERITA] Search error:', err);
-      const unreachable: NewsSearchErrorDetail = {
-        code: 'EDGE_FUNCTION_UNREACHABLE',
-        title: 'Edge Function Tidak Dapat Dihubungi',
-        message: err.message || 'Gagal mengirim request ke Supabase Edge Function',
-        errorName: err.name || 'NetworkError',
+      const detail: NewsSearchErrorDetail = {
+        code: 'EDGE_FUNCTION_HTTP_ERROR',
+        title: 'Gagal Memproses Pencarian Berita',
+        message: err.message || 'Terjadi kesalahan saat memproses pencarian berita.',
+        errorName: err.name,
         errorMessage: err.message,
-        recommendation: 'Pastikan koneksi internet stabil dan Edge Function news-search sudah dideploy.'
+        recommendation: 'Periksa log terminal atau coba ulangi pencarian dengan kata kunci lain.'
       };
-      setErrorMessage(unreachable.message);
-      setErrorDetail(unreachable);
+      setErrorMessage(detail.message);
+      setErrorDetail(detail);
     } finally {
       setIsLoading(false);
     }

@@ -366,6 +366,26 @@ export function classifyNewsError(
 
   const errString = `${errorMessage} ${typeof responseBody === 'object' ? JSON.stringify(responseBody) : responseBody || ''} ${errorName}`.toLowerCase();
 
+  // 0. QUERY_REQUIRED (HTTP 400 - Query pencarian berita belum diisi)
+  if (
+    responseBody?.code === 'QUERY_REQUIRED' ||
+    errString.includes('query pencarian berita wajib diisi') ||
+    errString.includes('query_required')
+  ) {
+    return {
+      code: 'EDGE_FUNCTION_HTTP_ERROR',
+      functionName: 'news-search',
+      stage: 'request_validation',
+      title: 'Kata Kunci Belum Diisi',
+      message: 'Masukkan kata kunci berita terlebih dahulu.',
+      errorName: 'QueryRequiredError',
+      errorMessage: 'Query pencarian berita wajib diisi.',
+      responseStatus: 400,
+      responseBody,
+      recommendation: 'Ketik topik atau kata kunci berita yang ingin dicari (contoh: KORUPSI, berita terkini Sumatera Utara Medan).'
+    };
+  }
+
   // 1. OMNIROUTE_AUTH_ERROR (HTTP 401 / OMNIROUTE_API_KEY tidak valid)
   if (
     responseStatus === 401 ||
@@ -644,7 +664,24 @@ export class OmniRouteNewsProvider implements NewsProvider {
   }
 
   async search(params: NewsSearchParams): Promise<OmniRouteSearchResult> {
-    const query = params.query || '';
+    const query = (params.query || '').trim();
+    if (!query) {
+      return {
+        articles: [],
+        error: 'Masukkan kata kunci berita terlebih dahulu.',
+        errorDetail: {
+          code: 'EDGE_FUNCTION_HTTP_ERROR',
+          functionName: 'news-search',
+          stage: 'request_validation',
+          title: 'Kata Kunci Belum Diisi',
+          message: 'Masukkan kata kunci berita terlebih dahulu.',
+          responseStatus: 400,
+          recommendation: 'Ketik topik atau kata kunci pencarian (misal: "KORUPSI", "berita terkini Sumatera Utara Medan").'
+        },
+        status: 400
+      };
+    }
+
     const category = params.category || 'SEMUA';
     const province = params.province || '';
     const city = params.city || '';
