@@ -47,10 +47,19 @@ import {
   FactCheckResult,
   UserRole,
   NewsSearchErrorDetail,
-  NewsErrorCode
+  NewsErrorCode,
+  LocationScope,
+  NewsLocation
 } from '../../types';
 import { newsService } from '../../services/newsService';
-import { COUNTRIES, EDUCATION_LEVELS, JOB_FIELDS } from '../../data/indonesiaLocations';
+import { 
+  GLOBAL_REGIONS, 
+  INTERNATIONAL_COUNTRIES, 
+  INDONESIA_PROVINCES_38, 
+  POPULAR_LOCATION_PRESETS,
+  buildEnhancedSearchQuery
+} from '../../data/newsLocations';
+import { EDUCATION_LEVELS, JOB_FIELDS } from '../../data/indonesiaLocations';
 
 interface NewsSearchProps {
   userRole: UserRole;
@@ -83,17 +92,24 @@ const PRESETS = [
   { label: '🏆 Prestasi & Kejuaraan', query: 'juara olimpiade medali prestasi siswa', category: 'KEJUARAAN' },
   { label: '💼 Lowongan Kerja', query: 'lowongan kerja loker smk d3 s1', category: 'PEKERJAAN' },
   { label: '📢 Info Sekolah', query: 'pengumuman sekolah kalender pendidikan kurikulum', category: 'SEKOLAH' },
-  { label: '🌎 Nasional', query: 'nasional indonesia terkini', category: 'NASIONAL' },
-  { label: '🌐 Internasional', query: 'internasional dunia perkembangan teknologi', category: 'INTERNASIONAL' },
+  { label: '🇮🇩 Nasional', query: 'nasional indonesia terkini', category: 'NASIONAL' },
+  { label: '🌐 Internasional', query: 'internasional dunia perkembangan global', category: 'INTERNASIONAL' },
 ];
 
 export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   // Search parameters state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<NewsCategory>('SEMUA');
-  const [selectedCountry, setSelectedCountry] = useState('Indonesia');
-  const [selectedProvince, setSelectedProvince] = useState('Sumatera Utara');
-  const [selectedCity, setSelectedCity] = useState('Semua Kota/Kabupaten');
+  
+  // Location States (Sistem Lokasi Terlengkap)
+  const [locationScope, setLocationScope] = useState<LocationScope>('PROVINSI_KOTA');
+  const [selectedRegion, setSelectedRegion] = useState<string>('Semua Region');
+  const [selectedCountry, setSelectedCountry] = useState<string>('Indonesia');
+  const [selectedProvince, setSelectedProvince] = useState<string>('Sumatera Utara');
+  const [selectedCity, setSelectedCity] = useState<string>('Medan');
+  const [customLocationText, setCustomLocationText] = useState<string>('');
+  
+  // Filter Waktu & Sorting
   const [selectedDateRange, setSelectedDateRange] = useState<NewsDateRange>('latest');
   const [selectedSort, setSelectedSort] = useState<NewsSortOption>('RELEVAN_TERBARU');
 
@@ -119,10 +135,13 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
   const [activeFactCheck, setActiveFactCheck] = useState<FactCheckResult | null>(null);
   const [isFactChecking, setIsFactChecking] = useState(false);
 
-  // Provinces and cities helper
-  const currentCountryData = COUNTRIES.find(c => c.name === selectedCountry) || COUNTRIES[0];
-  const currentProvinceData = currentCountryData.provinces.find(p => p.name === selectedProvince);
-  const availableCities = currentProvinceData ? currentProvinceData.cities : ['Semua Kota/Kabupaten'];
+  // Data Helper untuk Dropdown Provinsi & Kota
+  const currentProvinceData = INDONESIA_PROVINCES_38.find(p => p.name === selectedProvince);
+  const availableIndonesianCities = currentProvinceData ? currentProvinceData.cities : ['Semua Kota/Kabupaten'];
+
+  // Data Helper untuk Internasional
+  const currentInternationalCountryData = INTERNATIONAL_COUNTRIES.find(c => c.name === selectedCountry);
+  const availableInternationalCities = currentInternationalCountryData ? currentInternationalCountryData.cities : ['Semua Kota'];
 
   const getErrorCodeBadge = (code?: NewsErrorCode) => {
     switch (code) {
@@ -210,7 +229,8 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
       query: 'berita terkini sumatera utara medan',
       category: 'SEMUA',
       province: 'Sumatera Utara',
-      city: 'Medan'
+      city: 'Medan',
+      country: 'Indonesia'
     });
     loadRecommendations();
   }, []);
@@ -282,7 +302,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
         stage: 'request_validation',
         title: 'Kata Kunci Belum Diisi',
         message: 'Masukkan kata kunci berita terlebih dahulu.',
-        recommendation: 'Ketik topik atau kata kunci pencarian (misal: "KORUPSI", "berita terkini Sumatera Utara Medan").'
+        recommendation: 'Ketik topik atau kata kunci pencarian (misal: "KORUPSI", "banjir medan", "gempa bumi jepang").'
       });
       return;
     }
@@ -293,12 +313,47 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
     setLoadingMessage('AI SEDANG MENCARI BERITA TERKINI...');
 
     try {
+      // Menyiapkan parameter lokasi aktif
+      let activeCountry = customParams?.country !== undefined ? customParams.country : selectedCountry;
+      let activeProvince = customParams?.province !== undefined ? customParams.province : selectedProvince;
+      let activeCity = customParams?.city !== undefined ? customParams.city : selectedCity;
+      let activeRegion = customParams?.region !== undefined ? customParams.region : (selectedRegion !== 'Semua Region' ? selectedRegion : '');
+      let activeLocationStr = '';
+
+      if (locationScope === 'GLOBAL') {
+        activeCountry = '';
+        activeProvince = '';
+        activeCity = '';
+        activeLocationStr = activeRegion ? `Region ${activeRegion}` : 'Global';
+      } else if (locationScope === 'INDONESIA') {
+        activeCountry = 'Indonesia';
+        activeProvince = '';
+        activeCity = '';
+        activeLocationStr = 'Indonesia';
+      } else if (locationScope === 'PROVINSI_KOTA') {
+        activeCountry = 'Indonesia';
+        const parts = [];
+        if (activeCity && activeCity !== 'Semua Kota/Kabupaten') parts.push(activeCity);
+        if (activeProvince && activeProvince !== 'Semua Provinsi') parts.push(activeProvince);
+        parts.push('Indonesia');
+        activeLocationStr = parts.join(', ');
+      } else if (locationScope === 'INTERNATIONAL') {
+        const parts = [];
+        if (activeCity && activeCity !== 'Semua Kota') parts.push(activeCity);
+        if (activeCountry) parts.push(activeCountry);
+        activeLocationStr = parts.join(', ');
+      } else if (locationScope === 'CUSTOM') {
+        activeLocationStr = customLocationText.trim() || 'Global';
+      }
+
       const params: NewsSearchParams = {
         query: finalQuery,
         category: customParams?.category !== undefined ? customParams.category : selectedCategory,
-        country: selectedCountry,
-        province: customParams?.province !== undefined ? customParams.province : selectedProvince,
-        city: customParams?.city !== undefined ? customParams.city : selectedCity,
+        location: activeLocationStr,
+        country: activeCountry,
+        region: activeRegion,
+        province: activeProvince,
+        city: activeCity !== 'Semua Kota/Kabupaten' && activeCity !== 'Semua Kota' ? activeCity : '',
         dateRange: selectedDateRange,
         sort: selectedSort,
         minEducation: selectedEducation,
@@ -350,6 +405,31 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
     setSearchQuery(preset.query);
     setSelectedCategory(preset.category as NewsCategory);
     handleSearch({ query: preset.query, category: preset.category as NewsCategory });
+  };
+
+  const handleLocationPresetClick = (locPreset: typeof POPULAR_LOCATION_PRESETS[0]) => {
+    setLocationScope(locPreset.scope);
+    if (locPreset.country) setSelectedCountry(locPreset.country);
+    if (locPreset.province) setSelectedProvince(locPreset.province);
+    if (locPreset.city) setSelectedCity(locPreset.city);
+    if (locPreset.region) setSelectedRegion(locPreset.region);
+    
+    showToast(`📍 Lokasi diatur ke: ${locPreset.label}`);
+    
+    // Langsung jalankan pencarian jika query sudah ada atau gunakan label lokasi
+    const currentQ = searchQuery.trim() || `berita terkini ${locPreset.label}`;
+    if (!searchQuery.trim()) {
+      setSearchQuery(currentQ);
+    }
+    
+    handleSearch({
+      query: currentQ,
+      country: locPreset.country,
+      province: locPreset.province,
+      city: locPreset.city,
+      region: locPreset.region,
+      location: locPreset.label
+    });
   };
 
   const handleFactCheck = async (article: NewsArticle) => {
@@ -628,6 +708,25 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           </div>
         </div>
 
+        {/* Preset Lokasi Cepat (Quick Location Presets) */}
+        <div className="space-y-1.5 pt-1">
+          <div className="text-[11px] font-mono font-bold uppercase text-neutral-500 flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-[#0096D6]" />
+            <span>PRESET LOKASI CEPAT:</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {POPULAR_LOCATION_PRESETS.map((locPreset, idx) => (
+              <button
+                key={locPreset.label || idx}
+                onClick={() => handleLocationPresetClick(locPreset)}
+                className="px-3 py-1.5 bg-[#FAF8F5] hover:bg-[#00E5FF] text-[#18181B] font-display font-bold text-xs rounded-lg border border-[#18181B] shadow-[1px_1px_0px_#18181B] active:translate-y-[1px] transition-all flex items-center gap-1"
+              >
+                <span>{locPreset.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Category Pills (Syarat 8: 16 Kategori) */}
         <div className="space-y-1.5 pt-1">
           <div className="text-[11px] font-mono font-bold uppercase text-neutral-500">
@@ -656,47 +755,263 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           </div>
         </div>
 
-        {/* Location & Time Filters (Syarat 9 & 22) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-neutral-200">
-          {/* Provinsi */}
-          <div>
-            <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
-              Provinsi (Lokasi)
-            </label>
-            <select
-              value={selectedProvince}
-              onChange={(e) => {
-                setSelectedProvince(e.target.value);
-                setSelectedCity('Semua Kota/Kabupaten');
+        {/* Panel Pengaturan Lokasi Komprehensif (Syarat Lokasi Terlengkap) */}
+        <div className="p-4 bg-[#F8F9FA] border-2 border-[#18181B] rounded-xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-300 pb-2.5">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-[#0096D6]" />
+              <span className="font-display font-black text-xs uppercase text-[#18181B]">
+                PILIHAN CAKUPAN WILAYAH & LOKASI
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-neutral-600 font-bold">
+              Aktif:{' '}
+              <span className="text-[#0096D6]">
+                {locationScope === 'GLOBAL'
+                  ? selectedRegion !== 'Semua Region' ? `Global (${selectedRegion})` : 'Seluruh Dunia'
+                  : locationScope === 'INDONESIA'
+                  ? 'Nasional Indonesia'
+                  : locationScope === 'PROVINSI_KOTA'
+                  ? `${selectedCity !== 'Semua Kota/Kabupaten' ? selectedCity + ', ' : ''}${selectedProvince}`
+                  : locationScope === 'INTERNATIONAL'
+                  ? `${selectedCity !== 'Semua Kota' ? selectedCity + ', ' : ''}${selectedCountry}`
+                  : customLocationText || 'Lokasi Bebas'}
+              </span>
+            </div>
+          </div>
+
+          {/* Scope Selector Tabs */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            <button
+              onClick={() => {
+                setLocationScope('GLOBAL');
+                setSelectedCountry('');
+                setSelectedProvince('');
+                setSelectedCity('');
               }}
-              className="w-full px-3 py-2 bg-[#FAF8F5] border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+              className={`px-2.5 py-2 rounded-lg border font-display font-bold text-xs transition-all text-center ${
+                locationScope === 'GLOBAL'
+                  ? 'bg-[#FFD166] text-[#18181B] border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                  : 'bg-white hover:bg-neutral-100 text-neutral-700 border-neutral-300'
+              }`}
             >
-              {currentCountryData.provinces.map(p => (
-                <option key={p.id} value={p.name}>{p.name}</option>
-              ))}
-            </select>
+              🌎 Seluruh Dunia
+            </button>
+            <button
+              onClick={() => {
+                setLocationScope('INDONESIA');
+                setSelectedCountry('Indonesia');
+                setSelectedProvince('');
+                setSelectedCity('');
+              }}
+              className={`px-2.5 py-2 rounded-lg border font-display font-bold text-xs transition-all text-center ${
+                locationScope === 'INDONESIA'
+                  ? 'bg-[#FFD166] text-[#18181B] border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                  : 'bg-white hover:bg-neutral-100 text-neutral-700 border-neutral-300'
+              }`}
+            >
+              🇮🇩 Indonesia
+            </button>
+            <button
+              onClick={() => {
+                setLocationScope('PROVINSI_KOTA');
+                setSelectedCountry('Indonesia');
+                if (!selectedProvince || selectedProvince === 'Semua Provinsi') {
+                  setSelectedProvince('Sumatera Utara');
+                }
+              }}
+              className={`px-2.5 py-2 rounded-lg border font-display font-bold text-xs transition-all text-center ${
+                locationScope === 'PROVINSI_KOTA'
+                  ? 'bg-[#FFD166] text-[#18181B] border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                  : 'bg-white hover:bg-neutral-100 text-neutral-700 border-neutral-300'
+              }`}
+            >
+              📍 Provinsi & Kota
+            </button>
+            <button
+              onClick={() => {
+                setLocationScope('INTERNATIONAL');
+                if (selectedCountry === 'Indonesia' || !selectedCountry) {
+                  setSelectedCountry('Jepang');
+                  setSelectedCity('Tokyo');
+                }
+              }}
+              className={`px-2.5 py-2 rounded-lg border font-display font-bold text-xs transition-all text-center ${
+                locationScope === 'INTERNATIONAL'
+                  ? 'bg-[#FFD166] text-[#18181B] border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                  : 'bg-white hover:bg-neutral-100 text-neutral-700 border-neutral-300'
+              }`}
+            >
+              🌐 Internasional
+            </button>
+            <button
+              onClick={() => setLocationScope('CUSTOM')}
+              className={`px-2.5 py-2 rounded-lg border font-display font-bold text-xs transition-all text-center col-span-2 sm:col-span-1 ${
+                locationScope === 'CUSTOM'
+                  ? 'bg-[#FFD166] text-[#18181B] border-[#18181B] shadow-[2px_2px_0px_#18181B]'
+                  : 'bg-white hover:bg-neutral-100 text-neutral-700 border-neutral-300'
+              }`}
+            >
+              🔍 Lokasi Bebas
+            </button>
           </div>
 
-          {/* Kota/Kabupaten */}
-          <div>
-            <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
-              Kota / Kabupaten
-            </label>
-            <select
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="w-full px-3 py-2 bg-[#FAF8F5] border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
-            >
-              {availableCities.map(city => (
-                <option key={city} value={city}>{city}</option>
-              ))}
-            </select>
-          </div>
+          {/* Dynamic Controls based on active scope */}
+          {locationScope === 'GLOBAL' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-fadeIn">
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Filter Kawasan / Region Dunia (Opsional)
+                </label>
+                <select
+                  value={selectedRegion}
+                  onChange={(e) => setSelectedRegion(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+                >
+                  <option value="Semua Region">Semua Region (Seluruh Dunia)</option>
+                  {GLOBAL_REGIONS.map((r) => (
+                    <option key={r.id} value={r.name}>
+                      {r.icon} {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center text-xs font-mono text-neutral-600 bg-neutral-100 p-2.5 rounded-lg border border-neutral-300">
+                <span>🌎 Menelusuri informasi berita aktual berskala internasional di seluruh dunia tanpa batasan wilayah lokal.</span>
+              </div>
+            </div>
+          )}
 
+          {locationScope === 'INDONESIA' && (
+            <div className="p-2.5 bg-neutral-100 border border-neutral-300 rounded-lg text-xs font-mono text-neutral-700 flex items-center gap-2 animate-fadeIn">
+              <span className="text-base">🇮🇩</span>
+              <span>Mode Berita Nasional Indonesia aktif: AI mencari berita terupdate skala nasional yang mencakup seluruh 38 provinsi di Indonesia.</span>
+            </div>
+          )}
+
+          {locationScope === 'PROVINSI_KOTA' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-fadeIn">
+              {/* Dropdown 38 Provinsi Indonesia */}
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Provinsi Indonesia (38 Provinsi Lengkap)
+                </label>
+                <select
+                  value={selectedProvince}
+                  onChange={(e) => {
+                    setSelectedProvince(e.target.value);
+                    setSelectedCity('Semua Kota/Kabupaten');
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+                >
+                  {INDONESIA_PROVINCES_38.map((p) => (
+                    <option key={p.id} value={p.name}>
+                      {p.name} ({p.region})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dropdown Kota/Kabupaten */}
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Kota / Kabupaten ({selectedProvince})
+                </label>
+                <select
+                  value={selectedCity}
+                  onChange={(e) => setSelectedCity(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+                >
+                  {availableIndonesianCities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {locationScope === 'INTERNATIONAL' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-fadeIn">
+              {/* Dropdown Negara Internasional */}
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Negara Internasional
+                </label>
+                <select
+                  value={selectedCountry}
+                  onChange={(e) => {
+                    const countryName = e.target.value;
+                    setSelectedCountry(countryName);
+                    const found = INTERNATIONAL_COUNTRIES.find(c => c.name === countryName);
+                    setSelectedCity(found && found.cities.length > 1 ? found.cities[1] : 'Semua Kota');
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+                >
+                  {INTERNATIONAL_COUNTRIES.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name} ({c.region})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dropdown Kota Internasional */}
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Kota ({selectedCountry})
+                </label>
+                <select
+                  value={selectedCity}
+                  onChange={(e) => setSelectedCity(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] focus:outline-none"
+                >
+                  {availableInternationalCities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {locationScope === 'CUSTOM' && (
+            <div className="space-y-2 pt-1 animate-fadeIn">
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
+                  Ketik Lokasi / Wilayah Bebas (Kota, Kabupaten, Kecamatan, Wilayah Khusus)
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={customLocationText}
+                    onChange={(e) => setCustomLocationText(e.target.value)}
+                    placeholder="Contoh: Medan Sunggal, Silicon Valley, Kyoto, Manchester, IKN Sepaku..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-[#18181B] rounded-lg font-display font-bold text-xs text-[#18181B] placeholder:text-neutral-400 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1 text-[11px] font-mono text-neutral-500">
+                <span>Contoh Cepat:</span>
+                {['Medan', 'Jakarta', 'Bandung', 'Surabaya', 'Tokyo', 'London', 'Singapore', 'Deli Serdang'].map((sug) => (
+                  <button
+                    key={sug}
+                    onClick={() => setCustomLocationText(sug)}
+                    className="px-2 py-0.5 bg-neutral-200 hover:bg-[#FFD166] text-neutral-800 rounded text-[10px] font-bold"
+                  >
+                    {sug}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Filter Waktu & Sorting Bar (Syarat 21 & 22) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neutral-200">
           {/* Filter Waktu (Syarat 22) */}
           <div>
             <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
-              Rentang Waktu
+              Rentang Waktu Publikasi
             </label>
             <select
               value={selectedDateRange}
@@ -715,7 +1030,7 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
           {/* Sorting (Syarat 21) */}
           <div>
             <label className="block text-[11px] font-mono font-bold text-neutral-600 uppercase mb-1">
-              Urutan (Sorting)
+              Urutan Hasil (Sorting)
             </label>
             <select
               value={selectedSort}
@@ -1017,10 +1332,12 @@ export const NewsSearch: React.FC<NewsSearchProps> = ({ userRole }) => {
                       <span className="px-2 py-0.5 rounded-md bg-[#18181B] text-white font-mono font-black text-[10px] uppercase border border-white/20">
                         {article.category}
                       </span>
-                      {(article.city || article.province) && (
+                      {(article.city || article.province || article.country || article.location) && (
                         <span className="px-2 py-0.5 rounded-md bg-white/95 text-[#18181B] font-mono font-bold text-[10px] border border-[#18181B] flex items-center gap-1">
                           <MapPin className="w-2.5 h-2.5 text-[#0096D6]" />
-                          {article.city || article.province}
+                          {article.city && article.province 
+                            ? `${article.city}, ${article.province}` 
+                            : article.city || article.province || article.country || article.location}
                         </span>
                       )}
                     </div>

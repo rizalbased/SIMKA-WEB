@@ -699,16 +699,26 @@ export class OmniRouteNewsProvider implements NewsProvider {
     }
 
     const category = params.category || 'SEMUA';
+    const location = params.location || '';
+    const country = params.country || '';
+    const region = params.region || '';
     const province = params.province || '';
     const city = params.city || '';
+    const district = params.district || '';
+    const language = params.language || '';
     const timeRange = params.dateRange || 'latest';
     const sort = params.sort || 'RELEVAN_TERBARU';
 
     console.log('[SIMKA BERITA] 3. Memanggil Supabase Edge Function news-search:', {
       query,
       category,
+      location,
+      country,
+      region,
       province,
       city,
+      district,
+      language,
       timeRange,
       sort
     });
@@ -719,17 +729,24 @@ export class OmniRouteNewsProvider implements NewsProvider {
     let responseBody: any = undefined;
 
     try {
-      // Pemanggilan function sesuai instruksi Bagian 2
+      // Pemanggilan function sesuai instruksi Bagian 2 & 20
       const response = await supabase.functions.invoke(
         'news-search',
         {
           body: {
             query,
             category,
+            location: location || [city, province, country, region].filter(Boolean).join(', '),
+            country,
+            region,
             province,
             city,
+            district,
+            language,
             timeRange,
-            sort
+            sort,
+            minEducation: params.minEducation,
+            jobField: params.jobField
           }
         }
       );

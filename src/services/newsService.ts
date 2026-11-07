@@ -9,50 +9,53 @@ import {
   AIQueryUnderstanding, 
   FactCheckResult,
   NewsSortOption,
-  NewsSearchErrorDetail
+  NewsSearchErrorDetail,
+  LocationScope
 } from '../types';
 import { PublicVerifiedRssProvider, OmniRouteNewsProvider, testEdgeFunctionHealth } from './newsProvider';
+import { parseLocationFromQuery, buildEnhancedSearchQuery } from '../data/newsLocations';
 
 const rssProvider = new PublicVerifiedRssProvider();
 const omnirouteProvider = new OmniRouteNewsProvider();
 
 /**
  * AI Natural Language Query Parser
- * Menganalisis maksud pencarian: topik, lokasi, target, waktu, dan kategori
+ * Menganalisis maksud pencarian: topik, cakupan lokasi, target, waktu, dan kategori
  */
 export function parseQueryWithAI(rawQuery: string): AIQueryUnderstanding {
   const q = rawQuery.trim().toLowerCase();
   
   let interpretedTopic = rawQuery;
   let interpretedCategory: NewsCategory = 'SEMUA';
+  let interpretedScope: LocationScope | undefined = undefined;
+  let country: string | undefined = undefined;
+  let region: string | undefined = undefined;
   let province: string | undefined = undefined;
   let city: string | undefined = undefined;
+  let locationLabel: string | undefined = undefined;
   let interpretedTime: string | undefined = undefined;
   let targetAudience: string | undefined = undefined;
   const expandedKeywords: string[] = [rawQuery];
 
-  // 1. Deteksi Lokasi
-  if (q.includes('medan')) {
-    city = 'Medan';
-    province = 'Sumatera Utara';
-    expandedKeywords.push('Kota Medan', 'Sumatera Utara');
-  } else if (q.includes('deli serdang')) {
-    city = 'Deli Serdang';
-    province = 'Sumatera Utara';
-  } else if (q.includes('binjai')) {
-    city = 'Binjai';
-    province = 'Sumatera Utara';
-  } else if (q.includes('sumut') || q.includes('sumatera utara')) {
-    province = 'Sumatera Utara';
-  } else if (q.includes('jakarta')) {
-    city = 'Jakarta';
-    province = 'DKI Jakarta';
-  } else if (q.includes('bandung')) {
-    city = 'Bandung';
-    province = 'Jawa Barat';
-  } else if (q.includes('surabaya')) {
-    city = 'Surabaya';
-    province = 'Jawa Timur';
+  // 1. Deteksi Lokasi Terstruktur menggunakan newsLocations engine
+  const parsedLoc = parseLocationFromQuery(rawQuery);
+  if (parsedLoc) {
+    interpretedScope = parsedLoc.scope;
+    country = parsedLoc.country;
+    region = parsedLoc.region;
+    province = parsedLoc.province;
+    city = parsedLoc.city;
+    locationLabel = parsedLoc.label;
+
+    if (city && city !== 'Semua Kota/Kabupaten') {
+      expandedKeywords.push(city);
+    }
+    if (province && province !== 'Semua Provinsi') {
+      expandedKeywords.push(province);
+    }
+    if (country) {
+      expandedKeywords.push(country);
+    }
   }
 
   // 2. Deteksi Target Audiens
@@ -68,39 +71,53 @@ export function parseQueryWithAI(rawQuery: string): AIQueryUnderstanding {
   }
 
   // 3. Deteksi Waktu
-  if (q.includes('hari ini') || q.includes('sekarang')) {
+  if (q.includes('hari ini') || q.includes('sekarang') || q.includes('today')) {
     interpretedTime = 'Hari ini';
-  } else if (q.includes('terbaru') || q.includes('terkini') || q.includes('update')) {
+  } else if (q.includes('terbaru') || q.includes('terkini') || q.includes('update') || q.includes('latest')) {
     interpretedTime = 'Terkini';
   }
 
   // 4. Deteksi Kategori
-  if (q.includes('banjir') || q.includes('gempa') || q.includes('longsor') || q.includes('bencana')) {
+  if (q.includes('banjir') || q.includes('gempa') || q.includes('longsor') || q.includes('bencana') || q.includes('earthquake') || q.includes('disaster') || q.includes('flood')) {
     interpretedCategory = 'BENCANA';
-    interpretedTopic = q.includes('banjir') ? 'Banjir & Genangan Air' : 'Bencana Alam & Cuaca';
+    interpretedTopic = q.includes('banjir') ? 'Banjir & Genangan Air' : (q.includes('earthquake') || q.includes('gempa') ? 'Gempa Bumi' : 'Bencana Alam & Cuaca');
     expandedKeywords.push('BPBD', 'BMKG', 'evakuasi', 'peringatan dini');
-  } else if (q.includes('lowongan') || q.includes('loker') || q.includes('kerja') || q.includes('karir')) {
+  } else if (q.includes('lowongan') || q.includes('loker') || q.includes('kerja') || q.includes('karir') || q.includes('job') || q.includes('career') || q.includes('hiring')) {
     interpretedCategory = 'PEKERJAAN';
     interpretedTopic = 'Lowongan Pekerjaan & Rekrutmen';
-    expandedKeywords.push('rekrutmen', 'karir', 'penempatan kerja');
-  } else if (q.includes('prestasi') || q.includes('juara') || q.includes('olimpiade') || q.includes('medali')) {
+    expandedKeywords.push('rekrutmen', 'karir', 'penempatan kerja', 'hiring');
+  } else if (q.includes('prestasi') || q.includes('juara') || q.includes('olimpiade') || q.includes('medali') || q.includes('champion') || q.includes('tournament') || q.includes('cup')) {
     interpretedCategory = 'KEJUARAAN';
-    interpretedTopic = 'Prestasi & Kejuaraan Pelajar';
+    interpretedTopic = 'Prestasi & Kejuaraan';
     expandedKeywords.push('lomba', 'pemenang', 'penghargaan');
-  } else if (q.includes('sekolah') || q.includes('pendidikan') || q.includes('beasiswa') || q.includes('kurikulum')) {
+  } else if (q.includes('sekolah') || q.includes('pendidikan') || q.includes('beasiswa') || q.includes('kurikulum') || q.includes('education') || q.includes('school') || q.includes('university')) {
     interpretedCategory = 'PENDIDIKAN';
     interpretedTopic = 'Informasi Pendidikan & Sekolah';
-    expandedKeywords.push('Kemendikbud', 'Dinas Pendidikan', 'akademik');
-  } else if (q.includes('teknologi') || q.includes('ai') || q.includes('robot')) {
+    expandedKeywords.push('Kemendikbud', 'Dinas Pendidikan', 'akademik', 'education');
+  } else if (q.includes('teknologi') || q.includes('ai') || q.includes('robot') || q.includes('tech') || q.includes('artificial intelligence') || q.includes('software')) {
     interpretedCategory = 'TEKNOLOGI';
     interpretedTopic = 'Inovasi Sains & Teknologi';
+    expandedKeywords.push('technology', 'innovation', 'AI');
+  } else if (q.includes('sepak bola') || q.includes('olahraga') || q.includes('sports') || q.includes('football') || q.includes('badminton')) {
+    interpretedCategory = 'OLAHRAGA';
+    interpretedTopic = 'Olahraga & Sport';
+  } else if (q.includes('kesehatan') || q.includes('health') || q.includes('vaksin') || q.includes('medis')) {
+    interpretedCategory = 'KESEHATAN';
+    interpretedTopic = 'Kesehatan & Medis';
   }
 
   return {
     originalQuery: rawQuery,
     interpretedTopic,
     interpretedCategory,
-    interpretedLocation: (province || city) ? { province, city } : undefined,
+    interpretedLocation: (province || city || country || region || locationLabel) ? {
+      scope: interpretedScope,
+      country,
+      region,
+      province,
+      city,
+      label: locationLabel
+    } : undefined,
     interpretedTime,
     targetAudience,
     expandedKeywords
@@ -118,20 +135,28 @@ export const newsService = {
     errorDetail?: NewsSearchErrorDetail;
     source?: string;
   }> {
-    console.log('[SIMKA BERITA] 1. Query User:', params.query || '(Semua Berita)');
+    console.log('[SIMKA BERITA] 1. Query User:', params.query || '(Semua Berita)', 'Lokasi:', params.location || params.province || params.country || 'Global');
     let queryUnderstanding: AIQueryUnderstanding | undefined;
     if (params.query && params.query.trim().length > 0) {
       queryUnderstanding = parseQueryWithAI(params.query);
       console.log('[SIMKA BERITA] 2. Hasil Intent:', queryUnderstanding);
-      // Sinkronkan kategori/lokasi jika user tidak memilih manual
+      
+      // Sinkronkan kategori jika user belum memilih spesifik
       if ((!params.category || params.category === 'SEMUA') && queryUnderstanding.interpretedCategory && queryUnderstanding.interpretedCategory !== 'SEMUA') {
         params.category = queryUnderstanding.interpretedCategory;
+      }
+      // Sinkronkan lokasi jika user belum memilih lokasi manual
+      if (!params.country && queryUnderstanding.interpretedLocation?.country) {
+        params.country = queryUnderstanding.interpretedLocation.country;
       }
       if (!params.province && queryUnderstanding.interpretedLocation?.province) {
         params.province = queryUnderstanding.interpretedLocation.province;
       }
       if (!params.city && queryUnderstanding.interpretedLocation?.city) {
         params.city = queryUnderstanding.interpretedLocation.city;
+      }
+      if (!params.region && queryUnderstanding.interpretedLocation?.region) {
+        params.region = queryUnderstanding.interpretedLocation.region;
       }
     }
 

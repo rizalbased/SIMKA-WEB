@@ -338,6 +338,7 @@ export interface NewsArticle {
   ai_summary?: string;
   category: NewsCategory;
   country: string;
+  region?: string;
   province?: string;
   city?: string;
   source_name: string;
@@ -353,12 +354,33 @@ export interface NewsArticle {
   job_details?: NewsJobDetails;
 }
 
-export interface NewsSearchParams {
-  query: string;
-  category?: NewsCategory | string;
+export type LocationScope = 
+  | 'GLOBAL' 
+  | 'INDONESIA' 
+  | 'PROVINSI_KOTA' 
+  | 'INTERNATIONAL' 
+  | 'CUSTOM';
+
+export interface NewsLocation {
+  scope: LocationScope;
+  label: string;
+  region?: string;
   country?: string;
   province?: string;
   city?: string;
+  district?: string;
+  customText?: string;
+}
+
+export interface NewsSearchParams {
+  query: string;
+  category?: NewsCategory | string;
+  location?: string;
+  country?: string;
+  region?: string;
+  province?: string;
+  city?: string;
+  district?: string;
   dateRange?: NewsDateRange | string;
   language?: string;
   sort?: NewsSortOption;
@@ -373,8 +395,12 @@ export interface AIQueryUnderstanding {
   interpretedTopic: string;
   interpretedCategory?: NewsCategory;
   interpretedLocation?: {
+    scope?: LocationScope;
+    region?: string;
+    country?: string;
     province?: string;
     city?: string;
+    label?: string;
   };
   interpretedTime?: string;
   targetAudience?: string;
