@@ -45,6 +45,7 @@ import { LayoutPhotoSchedule } from '../layouts/LayoutPhotoSchedule';
 import { SignageHeader } from '../display/SignageHeader';
 import { SignageRunningText } from '../display/SignageRunningText';
 import { MediaPicker } from './MediaPicker';
+import { realtimeSyncService } from '../../services/realtimeSyncService';
 
 export const cleanSlideTitle = (title: string) => {
   if (!title) return 'Slide Konten';
@@ -275,6 +276,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         setSelectedBoardId('');
       }
       setBoardToDelete(null);
+      await realtimeSyncService.publishSync('boards', 'delete');
     } catch (err: any) {
       console.error('Error deleting board:', err);
       alert(`Gagal menghapus board dari database: ${err?.message || 'Terjadi kesalahan'}`);
@@ -339,6 +341,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       
       // Also update media library locally
       onUpdateMediaLibrary([mediaData, ...mediaLibrary]);
+      await realtimeSyncService.publishSync('media', 'create');
       
     } catch (err) {
       console.error(err);
@@ -523,6 +526,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
           orientation: item.orientation as any,
           dateAdded: item.created_at.split('T')[0]
         })));
+        await realtimeSyncService.publishSync('media', 'create');
       }
       
     } catch (err) {
@@ -551,9 +555,10 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     if (!isAdmin) return;
     const newBoards = boards.map(b => b.id === updatedBoard.id ? updatedBoard : b);
     onUpdateBoards(newBoards);
+    await realtimeSyncService.publishSync('slides', 'update', { activeBoardId: updatedBoard.id });
   };
 
-  const handleToggleBoardActive = (boardId: string) => {
+  const handleToggleBoardActive = async (boardId: string) => {
     if (!isAdmin) return;
     const newBoards = boards.map(b => ({
       ...b,
@@ -561,9 +566,15 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     }));
     onUpdateBoards(newBoards);
     onSetActiveBoard(boardId);
+    try {
+      await settingsService.saveActiveBoardId(boardId);
+    } catch (err) {
+      console.warn('Error persisting active board id:', err);
+    }
+    await realtimeSyncService.publishSync('boards', 'switch_board', { activeBoardId: boardId });
   };
 
-  const handleCreateBoard = () => {
+  const handleCreateBoard = async () => {
     if (!isAdmin || !newBoardName.trim()) return;
     const newBoard: BoardItem = {
       id: `board-${Date.now()}`,
@@ -579,6 +590,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     setIsNewBoardModalOpen(false);
     setNewBoardName('');
     setNewBoardDesc('');
+    await realtimeSyncService.publishSync('boards', 'create', { activeBoardId: newBoard.id });
   };
 
   const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
@@ -664,6 +676,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         await slideService.saveSlide(currentBoard.id, clonedSlideData, mediaWithPositions);
         const dbBoards = await slideService.getBoards();
         onUpdateBoards(dbBoards);
+        await realtimeSyncService.publishSync('slides', 'create', { activeBoardId: currentBoard.id });
       } else {
         const index = currentBoard.slides.findIndex(s => s.id === slide.id);
         const clonedSlide: SlideItem = {
@@ -695,6 +708,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
         await slideService.deleteSlide(slideToDelete.id);
         const dbBoards = await slideService.getBoards();
         onUpdateBoards(dbBoards);
+        await realtimeSyncService.publishSync('slides', 'delete', { activeBoardId: currentBoard.id });
       } else {
         const newSlides = currentBoard.slides.filter(s => s.id !== slideToDelete.id);
         const updatedBoard = {

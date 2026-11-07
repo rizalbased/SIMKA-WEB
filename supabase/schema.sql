@@ -181,3 +181,38 @@ ALTER TABLE news_articles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public Access" ON news_articles;
 CREATE POLICY "Enable Access for All" ON news_articles FOR ALL USING (true) WITH CHECK (true);
 
+-- 11. Tabel Display Settings (Header Theme, Running Text Settings, & Active Board)
+CREATE TABLE IF NOT EXISTS display_settings (
+    id TEXT PRIMARY KEY,
+    config JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE display_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Access" ON display_settings;
+CREATE POLICY "Enable Access for All" ON display_settings FOR ALL USING (true) WITH CHECK (true);
+
+-- ====================================================================
+-- AKTIFKAN SUPABASE REALTIME REPLICATION UNTUK SINKRONISASI OTOMATIS
+-- ====================================================================
+-- Jalankan perintah ini di Supabase SQL Editor agar postgres_changes 
+-- langsung disiarkan ke seluruh client digital signage:
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE 
+      jadwal_les, 
+      slides, 
+      slide_media, 
+      media, 
+      videos, 
+      running_text, 
+      display_settings;
+  EXCEPTION
+    WHEN duplicate_object THEN
+      NULL; -- Tabel sudah ada di publication
+  END;
+END $$;
+
+

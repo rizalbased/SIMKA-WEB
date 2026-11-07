@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { jadwalService } from '../../services/jadwalService';
+import { realtimeSyncService } from '../../services/realtimeSyncService';
 
 interface AdminJadwalLesProps {
   lessonPeriods: LessonPeriod[];
@@ -65,6 +66,7 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
       const updated = lessonPeriods.map(p => p.id === period.id ? period : p);
       onUpdateLessonPeriods(updated);
       setEditingPeriod(null);
+      await realtimeSyncService.publishSync('jadwal', 'update');
     } catch (err) {
       console.error('Error saving period:', err);
       alert('Gagal menyimpan ke database.');
@@ -86,6 +88,7 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
       await jadwalService.addJadwal(period);
       onUpdateLessonPeriods([...lessonPeriods, period]);
       setIsAddModalOpen(false);
+      await realtimeSyncService.publishSync('jadwal', 'create');
     } catch (err) {
       console.error('Error adding period:', err);
       alert('Gagal menyimpan ke database.');
@@ -96,6 +99,7 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
     try {
       await jadwalService.deleteJadwal(id);
       onUpdateLessonPeriods(lessonPeriods.filter(p => p.id !== id));
+      await realtimeSyncService.publishSync('jadwal', 'delete');
     } catch (err) {
       console.error('Error deleting period:', err);
       alert('Gagal menghapus dari database.');
@@ -117,6 +121,7 @@ export const AdminJadwalLes: React.FC<AdminJadwalLesProps> = ({
     try {
       await jadwalService.setJadwal(defaultPeriods);
       onUpdateLessonPeriods(defaultPeriods);
+      await realtimeSyncService.publishSync('jadwal', 'reload');
     } catch (err) {
       console.error('Error resetting periods:', err);
       alert('Gagal me-reset database.');

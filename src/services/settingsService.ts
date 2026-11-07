@@ -139,5 +139,43 @@ export const settingsService = {
       throw error;
     }
     return data;
+  },
+
+  async getActiveBoardId(): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('display_settings')
+        .select('*')
+        .eq('id', 'active_board')
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116' || error.code === 'PGRST205') {
+          return null;
+        }
+        console.warn('Error fetching active board id:', error);
+        return null;
+      }
+      return data?.config?.activeBoardId || null;
+    } catch (err) {
+      console.warn('Network error fetching active board id:', err);
+      return null;
+    }
+  },
+
+  async saveActiveBoardId(boardId: string) {
+    const { data, error } = await supabase
+      .from('display_settings')
+      .upsert({
+        id: 'active_board',
+        config: { activeBoardId: boardId }
+      });
+
+    if (error) {
+      console.error('Error saving active board id:', error);
+      throw error;
+    }
+    return data;
   }
 };
+

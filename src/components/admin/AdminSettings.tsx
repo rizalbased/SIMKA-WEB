@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { DisplayConfig } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { settingsService } from '../../services/settingsService';
+import { realtimeSyncService } from '../../services/realtimeSyncService';
 import { 
   Settings, 
   Tv, 
@@ -38,6 +39,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         await settingsService.saveHeaderTheme(formData.headerThemeConfig);
       }
       onUpdateConfig(formData);
+      await realtimeSyncService.publishSync('settings', 'update');
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
     } catch (err: any) {

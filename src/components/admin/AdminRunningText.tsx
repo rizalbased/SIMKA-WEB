@@ -15,8 +15,8 @@ import {
 } from 'lucide-react';
 import { runningTextService } from '../../services/runningTextService';
 import { SignageRunningText } from '../display/SignageRunningText';
-
 import { settingsService } from '../../services/settingsService';
+import { realtimeSyncService } from '../../services/realtimeSyncService';
 
 interface AdminRunningTextProps {
   config: DisplayConfig;
@@ -139,6 +139,7 @@ export const AdminRunningText: React.FC<AdminRunningTextProps> = ({
       await settingsService.saveRunningTextConfig(rtConfig);
 
       onUpdateConfig(rtConfig);
+      await realtimeSyncService.publishSync('running_text', 'update');
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
     } catch (err) {

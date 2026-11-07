@@ -22,6 +22,7 @@ import { slideService } from './services/slideService';
 import { runningTextService } from './services/runningTextService';
 import { jadwalService } from './services/jadwalService';
 import { settingsService } from './services/settingsService';
+import { realtimeSyncService } from './services/realtimeSyncService';
 import { FullscreenDisplay } from './components/display/FullscreenDisplay';
 import { StandaloneFullscreen } from './components/display/StandaloneFullscreen';
 import { AdminHeader } from './components/admin/AdminHeader';
@@ -154,20 +155,36 @@ export default function App() {
     const initData = async () => {
       try {
         // Fetch all data in parallel
-        const [dbBoards, dbRunningText, dbJadwal, dbHeaderTheme, dbRunningTextConfig] = await Promise.all([
+        const [
+          dbBoards, 
+          dbRunningText, 
+          dbJadwal, 
+          dbHeaderTheme, 
+          dbRunningTextConfig,
+          dbActiveBoardId
+        ] = await Promise.all([
           slideService.getBoards(),
           runningTextService.getRunningText(),
           jadwalService.getJadwal(),
           settingsService.getHeaderTheme(),
-          settingsService.getRunningTextConfig()
+          settingsService.getRunningTextConfig(),
+          settingsService.getActiveBoardId()
         ]);
 
         await refreshMedia();
         // Supabase is the single source of truth - set directly
-        setBoards(dbBoards);
+        if (dbActiveBoardId && dbBoards) {
+          setBoards(dbBoards.map(b => ({ ...b, isActive: b.id === dbActiveBoardId })));
+        } else {
+          setBoards(dbBoards);
+        }
         setLessonPeriods(dbJadwal);
         
         const updates: Partial<DisplayConfig> = {};
+
+        if (dbActiveBoardId) {
+          updates.activeBoardId = dbActiveBoardId;
+        }
         
         if (dbHeaderTheme) {
           updates.headerThemeConfig = dbHeaderTheme;
@@ -199,6 +216,36 @@ export default function App() {
       // ignore
     }
 
+    // Subscribe to unified realtime sync events across all tabs/windows and network
+    const unsubscribeSync = realtimeSyncService.subscribeSync((payload) => {
+      if (payload.entity === 'jadwal') {
+        jadwalService.getJadwal().then(setLessonPeriods);
+      } else if (payload.entity === 'slides' || payload.entity === 'boards') {
+        slideService.getBoards().then(dbBoards => {
+          if (payload.activeBoardId && dbBoards) {
+            setBoards(dbBoards.map(b => ({ ...b, isActive: b.id === payload.activeBoardId })));
+            handleUpdateConfig({ activeBoardId: payload.activeBoardId });
+          } else {
+            setBoards(dbBoards);
+          }
+        });
+      } else if (payload.entity === 'media' || payload.entity === 'videos') {
+        refreshMedia();
+      } else if (payload.entity === 'running_text') {
+        runningTextService.getRunningText().then(data => {
+          const activeText = data?.find(t => t.is_active);
+          handleUpdateConfig({ runningTextContent: activeText ? activeText.content : '' });
+        });
+        settingsService.getRunningTextConfig().then(cfg => {
+          if (cfg) handleUpdateConfig(cfg);
+        });
+      } else if (payload.entity === 'settings') {
+        settingsService.getHeaderTheme().then(theme => {
+          if (theme) handleUpdateConfig({ headerThemeConfig: theme });
+        });
+      }
+    });
+
     // Set up Realtime Subscriptions
     const mediaChannel = supabase.channel('media-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => refreshMedia())
@@ -216,6 +263,12 @@ export default function App() {
             settingsService.getRunningTextConfig().then(config => {
               if (config) handleUpdateConfig(config);
             });
+          } else if (id === 'active_board') {
+            const bId = (payload.new as any).config?.activeBoardId;
+            if (bId) {
+              handleUpdateConfig({ activeBoardId: bId });
+              setBoards(prev => prev.map(b => ({ ...b, isActive: b.id === bId })));
+            }
           }
         }
       })
@@ -242,6 +295,7 @@ export default function App() {
       .subscribe();
 
     return () => {
+      unsubscribeSync();
       supabase.removeChannel(mediaChannel);
       subscription.unsubscribe();
       window.removeEventListener('hashchange', handleHashChange);
@@ -297,6 +351,8 @@ export default function App() {
       ...prev,
       activeBoardId: boardId
     }));
+    settingsService.saveActiveBoardId(boardId).catch(console.warn);
+    realtimeSyncService.publishSync('boards', 'switch_board', { activeBoardId: boardId });
   };
 
   // Find active board

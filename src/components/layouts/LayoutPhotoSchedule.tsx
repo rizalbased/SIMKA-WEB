@@ -21,6 +21,35 @@ export const LayoutPhotoSchedule: React.FC<LayoutPhotoScheduleProps> = ({
 }) => {
   const photoUrl = customPhotoUrl || config?.slots?.splitPhotoUrl || 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80';
 
+  // Compute active and upcoming period if not provided
+  let activePeriod = currentPeriod;
+  let upcomingPeriod = nextPeriod;
+
+  if ((activePeriod === undefined || upcomingPeriod === undefined) && lessonPeriods.length > 0) {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const currentTime = `${hours}:${minutes}`;
+
+    for (let i = 0; i < lessonPeriods.length; i++) {
+      const item = lessonPeriods[i];
+      if (currentTime >= item.startTime && currentTime <= item.endTime) {
+        activePeriod = item;
+        upcomingPeriod = lessonPeriods[i + 1] || null;
+        break;
+      } else if (currentTime < item.startTime) {
+        if (!upcomingPeriod) {
+          upcomingPeriod = item;
+        }
+      }
+    }
+
+    if (!activePeriod && lessonPeriods.length > 0) {
+      activePeriod = lessonPeriods[0];
+      upcomingPeriod = lessonPeriods[1] || null;
+    }
+  }
+
   return (
     <div 
       id="layout-photo-schedule-canvas"
@@ -64,7 +93,7 @@ export const LayoutPhotoSchedule: React.FC<LayoutPhotoScheduleProps> = ({
         </div>
 
         {/* Realtime Status Badges (SEKARANG & BERIKUTNYA) */}
-        {(currentPeriod || nextPeriod) && (
+        {(activePeriod || upcomingPeriod) && (
           <div className="mb-4 grid grid-cols-2 gap-2">
             <div className="bg-[#00E5FF]/10 border border-[#00E5FF]/40 p-2.5 rounded flex flex-col">
               <span className="text-[10px] font-bold text-[#00E5FF] tracking-wider flex items-center gap-1 uppercase">
@@ -72,11 +101,11 @@ export const LayoutPhotoSchedule: React.FC<LayoutPhotoScheduleProps> = ({
                 SEKARANG
               </span>
               <span className="text-xs font-black text-white truncate mt-1">
-                {currentPeriod ? currentPeriod.name : 'TIDAK ADA LES'}
+                {activePeriod ? activePeriod.name : 'TIDAK ADA LES'}
               </span>
-              {currentPeriod?.subject && (
+              {activePeriod?.subject && (
                 <span className="text-[10px] text-gray-300 truncate">
-                  {currentPeriod.subject}
+                  {activePeriod.subject}
                 </span>
               )}
             </div>
@@ -87,11 +116,11 @@ export const LayoutPhotoSchedule: React.FC<LayoutPhotoScheduleProps> = ({
                 BERIKUTNYA
               </span>
               <span className="text-xs font-black text-white truncate mt-1">
-                {nextPeriod ? nextPeriod.name : 'SELESAI'}
+                {upcomingPeriod ? upcomingPeriod.name : 'SELESAI'}
               </span>
-              {nextPeriod?.subject && (
+              {upcomingPeriod?.subject && (
                 <span className="text-[10px] text-gray-300 truncate">
-                  {nextPeriod.subject}
+                  {upcomingPeriod.subject}
                 </span>
               )}
             </div>
@@ -101,7 +130,7 @@ export const LayoutPhotoSchedule: React.FC<LayoutPhotoScheduleProps> = ({
         {/* Schedule List */}
         <div className="flex-1 flex flex-col gap-2.5 overflow-hidden">
           {(lessonPeriods.length > 0 ? lessonPeriods.slice(0, 5) : []).map((item) => {
-            const isNow = currentPeriod?.id === item.id;
+            const isNow = activePeriod?.id === item.id;
             return (
               <div
                 key={item.id}

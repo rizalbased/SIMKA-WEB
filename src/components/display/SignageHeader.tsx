@@ -56,6 +56,9 @@ export const SignageHeader: React.FC<SignageHeaderProps> = ({ config, lessonPeri
 
         setCurrentPeriod(active);
         setNextPeriod(next);
+      } else {
+        setCurrentPeriod(null);
+        setNextPeriod(null);
       }
     };
 
