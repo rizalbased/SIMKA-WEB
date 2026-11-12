@@ -386,77 +386,128 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
       {/* GALERI MEDIA MODAL (Inner) */}
       {isGalleryOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] w-full max-w-4xl max-h-[85vh] rounded-3xl border-2 border-[#18181B] shadow-[8px_8px_0px_#18181B] flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-[#FFFDF9] w-full max-w-5xl xl:max-w-6xl max-h-[85vh] rounded-2xl border-3 border-[#18181B] shadow-[8px_8px_0px_#18181B] flex flex-col overflow-hidden">
             
             {/* Header Modal */}
-            <div className="bg-white border-b-2 border-[#18181B] px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div className="bg-white border-b-2 border-neutral-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shrink-0">
               <div>
-                <h3 className="font-display font-black text-xl text-[#18181B] uppercase tracking-wide">
+                <h3 className="font-display font-black text-lg md:text-xl text-[#18181B] uppercase tracking-wide">
                   GALERI MEDIA
                 </h3>
-                <p className="text-xs text-neutral-500 font-mono mt-0.5">Pilih {type.toUpperCase()} dari media yang pernah diunggah.</p>
+                <p className="text-xs text-neutral-500 font-mono mt-0.5">
+                  Pilih {type.toUpperCase()} dari media yang pernah diunggah.
+                </p>
               </div>
               <button 
                 onClick={() => setIsGalleryOpen(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-600 transition-colors"
+                className="w-9 h-9 flex items-center justify-center rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-700 transition-colors shadow-xs"
+                title="Tutup Modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Content Gallery */}
-            <div className="flex-1 overflow-y-auto p-6 bg-[#F8F6F0]">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-[#F8F6F0]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
                 
                 {/* Upload Card */}
                 <div 
-                  className="aspect-square bg-white rounded-2xl border-2 border-dashed border-[#18181B]/30 hover:border-[#0096D6] hover:bg-[#0096D6]/5 flex flex-col items-center justify-center cursor-pointer transition-all"
+                  className="group flex flex-col bg-white rounded-xl border-2 border-dashed border-[#18181B]/40 hover:border-[#0096D6] hover:bg-[#0096D6]/5 cursor-pointer transition-all overflow-hidden"
                   onClick={() => {
                     setIsGalleryOpen(false);
                     fileInputRef.current?.click();
                   }}
+                  title="Unggah media baru dari komputer / perangkat"
                 >
-                  <UploadCloud className="w-8 h-8 text-[#0096D6] mb-2" />
-                  <span className="text-[11px] font-bold text-[#18181B]">+ UNGGAH BARU</span>
+                  <div className="w-full aspect-square flex flex-col items-center justify-center p-3 text-center">
+                    <UploadCloud className="w-8 h-8 text-[#0096D6] mb-1.5 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-[#18181B]">+ UNGGAH</span>
+                    <span className="text-[9px] font-mono text-neutral-400 uppercase mt-0.5">{type}</span>
+                  </div>
+                  <div className="p-2 bg-neutral-50 border-t border-dashed border-neutral-200 text-center">
+                    <span className="text-[9px] font-mono text-neutral-500">Pilih dari perangkat</span>
+                  </div>
                 </div>
 
                 {/* Media Items */}
-                {mediaLibrary.filter(m => (type === 'foto' || type === 'poster') ? (m.type === 'foto' || m.type === 'poster') : m.type === 'video').map(media => (
-                  <div 
-                    key={media.id}
-                    onClick={() => {
-                      onChange(media.url);
-                      setIsGalleryOpen(false);
-                    }}
-                    className="group aspect-square rounded-2xl border-2 border-[#18181B] bg-neutral-900 overflow-hidden relative cursor-pointer hover:shadow-[4px_4px_0px_#0096D6] transition-all hover:translate-y-[-2px] flex items-center justify-center p-2"
-                  >
-                    {media.type === 'video' ? (
-                      <video src={media.url || undefined} className="w-full h-full object-contain group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <img src={media.thumbnailUrl || media.url || undefined} alt={media.title} className="w-full h-full object-contain group-hover:scale-105 transition-transform" />
-                    )}
-                    
-                    {/* Delete Button Overlay */}
-                    <button
-                      type="button"
-                      disabled={isDeleting === media.id}
-                      onClick={(e) => handleDeleteFromLibrary(e, media)}
-                      className={`absolute top-2 right-2 p-1.5 bg-rose-500 text-white rounded-lg transition-opacity z-20 border border-black/20 shadow-lg hover:bg-rose-600 ${
-                        isDeleting === media.id ? 'opacity-100 cursor-not-allowed' : 'opacity-0 group-hover:opacity-100'
+                {mediaLibrary.filter(m => (type === 'foto' || type === 'poster') ? (m.type === 'foto' || m.type === 'poster') : m.type === 'video').map(media => {
+                  const isSelected = value === media.url;
+                  return (
+                    <div 
+                      key={media.id}
+                      onClick={() => {
+                        onChange(media.url);
+                        setIsGalleryOpen(false);
+                      }}
+                      className={`group flex flex-col bg-white rounded-xl border-2 overflow-hidden cursor-pointer transition-all hover:-translate-y-0.5 relative ${
+                        isSelected 
+                          ? 'border-[#0096D6] ring-2 ring-[#0096D6] shadow-[3px_3px_0px_#0096D6]' 
+                          : 'border-[#18181B] hover:border-[#0096D6] hover:shadow-[3px_3px_0px_#0096D6]'
                       }`}
-                      title="Hapus Permanen dari Galeri"
+                      title={`Pilih: ${media.title || 'Media'}`}
                     >
-                      <Trash2 className={`w-3.5 h-3.5 ${isDeleting === media.id ? 'animate-spin' : ''}`} />
-                    </button>
+                      {/* Fixed Aspect Thumbnail Box with Neutral Dark Background & Object Contain */}
+                      <div className="relative w-full aspect-square bg-neutral-950 flex items-center justify-center p-2 overflow-hidden">
+                        {media.type === 'video' ? (
+                          <video 
+                            src={media.url || undefined} 
+                            className="w-full h-full object-contain pointer-events-none group-hover:scale-105 transition-transform duration-200" 
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img 
+                            src={media.thumbnailUrl || media.url || undefined} 
+                            alt={media.title} 
+                            loading="lazy"
+                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200" 
+                          />
+                        )}
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                      <div className="w-full">
-                        <p className="text-white text-[10px] font-bold truncate w-full">{media.title}</p>
-                        <p className="text-[8px] text-neutral-400 font-mono">{media.dimensions}</p>
+                        {/* Media Type Badge */}
+                        <div className="absolute top-1.5 left-1.5 pointer-events-none">
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm ${
+                            media.type === 'video' ? 'bg-amber-500 text-white' : 'bg-black/70 text-white backdrop-blur-xs'
+                          }`}>
+                            {media.type === 'video' ? 'VIDEO' : 'FOTO'}
+                          </span>
+                        </div>
+                        
+                        {/* Delete Button Overlay */}
+                        <button
+                          type="button"
+                          disabled={isDeleting === media.id}
+                          onClick={(e) => handleDeleteFromLibrary(e, media)}
+                          className={`absolute top-1.5 right-1.5 p-1.5 bg-rose-500 text-white rounded-lg transition-opacity z-20 border border-black/20 shadow-md hover:bg-rose-600 ${
+                            isDeleting === media.id ? 'opacity-100 cursor-not-allowed' : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                          title="Hapus Permanen dari Galeri"
+                        >
+                          <Trash2 className={`w-3.5 h-3.5 ${isDeleting === media.id ? 'animate-spin' : ''}`} />
+                        </button>
+
+                        {/* Hover / Selected Overlay */}
+                        <div className={`absolute inset-0 bg-black/40 transition-opacity flex items-center justify-center backdrop-blur-[1px] ${
+                          isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        }`}>
+                          <span className="text-white font-black text-[11px] bg-[#0096D6] px-3 py-1 rounded-lg border border-[#18181B] shadow-[2px_2px_0px_#18181B]">
+                            {isSelected ? 'TERPILIH' : 'PILIH'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Title & Metadata Caption Box */}
+                      <div className="p-2 bg-white border-t border-neutral-100 flex flex-col justify-between flex-1">
+                        <p className="text-[11px] font-bold text-[#18181B] truncate leading-tight" title={media.title}>
+                          {media.title || 'Media'}
+                        </p>
+                        <span className="text-[9px] font-mono text-neutral-400 truncate mt-0.5">
+                          {media.dimensions || (media.type === 'video' ? 'Video' : 'Foto')}
+                        </span>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

@@ -1886,43 +1886,97 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
          ========================================================================= */}
       {isMediaSelectorOpen && (
         <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#FFFDF9] rounded-2xl border-3 border-[#18181B] shadow-[6px_6px_0px_#18181B] w-full max-w-4xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b-2 border-neutral-200 shrink-0">
-              <h3 className="text-xl font-black font-display text-[#18181B] uppercase">
-                PILIH MEDIA DARI GALERI
-              </h3>
+          <div className="bg-[#FFFDF9] rounded-2xl border-3 border-[#18181B] shadow-[8px_8px_0px_#18181B] w-full max-w-5xl xl:max-w-6xl max-h-[85vh] flex flex-col overflow-hidden">
+            {/* Modal Header (Fixed/Sticky) */}
+            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-neutral-200 bg-white shrink-0">
+              <div>
+                <h3 className="text-lg md:text-xl font-black font-display text-[#18181B] uppercase tracking-wide">
+                  PILIH MEDIA DARI GALERI
+                </h3>
+                <p className="text-xs font-mono text-neutral-500 mt-0.5">
+                  Klik media untuk memasukkannya ke slide ({mediaLibrary.length} item tersedia)
+                </p>
+              </div>
               <button 
                 onClick={() => setIsMediaSelectorOpen(false)}
-                className="p-1 rounded-lg hover:bg-neutral-200 text-neutral-700"
+                className="w-9 h-9 flex items-center justify-center rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-700 transition-colors shadow-xs"
+                title="Tutup Modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {mediaLibrary.map(media => (
-                <div 
-                  key={media.id}
-                  onClick={() => handleAddExistingMediaToSlide(media)}
-                  className="group aspect-square rounded-2xl border-2 border-[#18181B] bg-neutral-900 overflow-hidden relative cursor-pointer hover:shadow-[4px_4px_0px_#0096D6] transition-all hover:translate-y-[-2px] flex items-center justify-center p-2"
-                >
-                  {media.type === 'video' || (media as any).file_type?.startsWith('video/') ? (
-                    <video src={getPublicUrl((media as any).file_path || media.url)} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  ) : (
-                    <img src={getPublicUrl((media as any).file_path || media.url)} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  )}
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-white font-bold text-xs bg-[#0096D6] px-3 py-1.5 rounded-lg border border-[#18181B]">
-                      PILIH
-                    </span>
+            {/* Modal Gallery Grid Area (Scrollable) */}
+            <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-[#F8F6F0]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                {mediaLibrary.map(media => {
+                  const mediaUrl = getPublicUrl((media as any).file_path || media.url);
+                  const isVideo = media.type === 'video' || (media as any).file_type?.startsWith('video/');
+                  const title = media.title || (media as any).file_name || 'Media';
+                  const meta = media.dimensions || (media as any).size || (isVideo ? 'Video' : 'Foto');
+
+                  return (
+                    <div 
+                      key={media.id}
+                      onClick={() => handleAddExistingMediaToSlide(media)}
+                      className="group flex flex-col bg-white rounded-xl border-2 border-[#18181B] overflow-hidden cursor-pointer hover:border-[#0096D6] hover:shadow-[3px_3px_0px_#0096D6] transition-all hover:-translate-y-0.5 relative"
+                      title={`Pilih: ${title}`}
+                    >
+                      {/* Fixed Aspect Thumbnail Box with Neutral Dark Background & Object Contain */}
+                      <div className="relative w-full aspect-square bg-neutral-950 flex items-center justify-center p-2 overflow-hidden">
+                        {isVideo ? (
+                          <video 
+                            src={mediaUrl} 
+                            className="w-full h-full object-contain pointer-events-none group-hover:scale-105 transition-transform duration-200" 
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img 
+                            src={mediaUrl} 
+                            alt={title}
+                            loading="lazy"
+                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200" 
+                          />
+                        )}
+
+                        {/* Media Type Badge */}
+                        <div className="absolute top-1.5 left-1.5 pointer-events-none">
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm ${
+                            isVideo ? 'bg-amber-500 text-white' : 'bg-black/70 text-white backdrop-blur-xs'
+                          }`}>
+                            {isVideo ? 'VIDEO' : 'FOTO'}
+                          </span>
+                        </div>
+
+                        {/* Hover Overlay */}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px]">
+                          <span className="text-white font-black text-[11px] bg-[#0096D6] px-3 py-1 rounded-lg border border-[#18181B] shadow-[2px_2px_0px_#18181B]">
+                            PILIH
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Title & Metadata Caption Box */}
+                      <div className="p-2 bg-white border-t border-neutral-100 flex flex-col justify-between flex-1">
+                        <p className="text-[11px] font-bold text-[#18181B] truncate leading-tight" title={title}>
+                          {title}
+                        </p>
+                        <span className="text-[9px] font-mono text-neutral-400 truncate mt-0.5">
+                          {meta}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {mediaLibrary.length === 0 && (
+                  <div className="col-span-full py-16 flex flex-col items-center justify-center text-center">
+                    <Film className="w-12 h-12 text-neutral-300 mb-3" />
+                    <p className="text-neutral-500 font-bold text-sm">Tidak ada media di galeri</p>
+                    <p className="text-neutral-400 font-mono text-xs mt-1">Unggah media baru melalui tab Galeri Media atau tombol upload slide</p>
                   </div>
-                </div>
-              ))}
-              {mediaLibrary.length === 0 && (
-                <div className="col-span-full py-12 flex items-center justify-center text-neutral-400 font-mono text-xs">
-                  Tidak ada media di galeri.
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
