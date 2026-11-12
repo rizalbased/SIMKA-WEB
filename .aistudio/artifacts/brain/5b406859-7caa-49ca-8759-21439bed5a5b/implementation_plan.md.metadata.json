@@ -1,6 +1,0 @@
-{
-  "summary": "Rencana Implementasi Sinkronisasi Realtime & Respon Cepat untuk Layar Fullscreen Digital Signage SIMKA. Mengintegrasikan Supabase Realtime Broadcast multi-device, Browser BroadcastChannel lokal 0ms, heartbeat polling 5 detik, serta sinkronisasi instan jadwal kegiatan dan foto tanpa perlu keluar fullscreen.",
-  "updatedAt": "2026-11-07T01:26:54.547725464Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

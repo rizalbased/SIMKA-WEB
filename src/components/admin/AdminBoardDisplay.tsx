@@ -31,7 +31,8 @@ import {
   Eye,
   Sliders,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Loader2
 } from 'lucide-react';
 import { slideService, isUUID } from '../../services/slideService';
 import { settingsService, DEFAULT_HEADER_THEME } from '../../services/settingsService';
@@ -122,6 +123,20 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
       }
     }
   }, [config.headerThemeConfig]);
+
+  // Pastikan selectedBoardId selalu valid terhadap daftar boards yang ada
+  React.useEffect(() => {
+    if (boards.length > 0) {
+      if (!selectedBoardId || !boards.some(b => b.id === selectedBoardId)) {
+        const nextId = (activeBoardId && boards.some(b => b.id === activeBoardId))
+          ? activeBoardId
+          : boards[0].id;
+        setSelectedBoardId(nextId);
+      }
+    } else {
+      setSelectedBoardId('');
+    }
+  }, [boards, activeBoardId, selectedBoardId]);
 
   const headerThemes = [
     {
@@ -544,6 +559,7 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   const [isNewBoardModalOpen, setIsNewBoardModalOpen] = useState(false);
   const [newBoardName, setNewBoardName] = useState('');
   const [newBoardDesc, setNewBoardDesc] = useState('');
+  const [isCreatingBoard, setIsCreatingBoard] = useState(false);
 
   // Photos & Media Presets
   const photoMedia = mediaLibrary.filter(m => m.type === 'foto');
@@ -555,6 +571,11 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
     if (!isAdmin) return;
     const newBoards = boards.map(b => b.id === updatedBoard.id ? updatedBoard : b);
     onUpdateBoards(newBoards);
+    try {
+      await slideService.updateBoard(updatedBoard);
+    } catch (err) {
+      console.warn('[AdminBoardDisplay] Gagal update board ke Supabase:', err);
+    }
     await realtimeSyncService.publishSync('slides', 'update', { activeBoardId: updatedBoard.id });
   };
 
@@ -575,22 +596,51 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
   };
 
   const handleCreateBoard = async () => {
-    if (!isAdmin || !newBoardName.trim()) return;
-    const newBoard: BoardItem = {
-      id: `board-${Date.now()}`,
-      name: newBoardName.trim(),
-      description: newBoardDesc.trim() || 'Board digital signage baru',
-      isActive: false,
-      loopMode: 'loop_forever',
-      createdAt: new Date().toISOString().split('T')[0],
-      slides: []
-    };
-    onUpdateBoards([...boards, newBoard]);
-    setSelectedBoardId(newBoard.id);
-    setIsNewBoardModalOpen(false);
-    setNewBoardName('');
-    setNewBoardDesc('');
-    await realtimeSyncService.publishSync('boards', 'create', { activeBoardId: newBoard.id });
+    if (!isAdmin || !newBoardName.trim() || isCreatingBoard) return;
+    setIsCreatingBoard(true);
+    try {
+      const boardId = `board-${Date.now()}`;
+      const newBoard: BoardItem = {
+        id: boardId,
+        name: newBoardName.trim(),
+        description: newBoardDesc.trim() || 'Board digital signage baru',
+        isActive: true, // Jadikan board baru sebagai board aktif (Syarat 6)
+        loopMode: 'loop_forever',
+        createdAt: new Date().toISOString().split('T')[0],
+        slides: []
+      };
+
+      // 1. Eksekusi INSERT ke Supabase secara permanen
+      const savedBoard = await slideService.createBoard(newBoard);
+
+      // 2. Muat ulang daftar board aktual dari database
+      const freshBoards = await slideService.getBoards();
+      const updatedList = freshBoards.length > 0 ? freshBoards : [savedBoard];
+
+      // 3. Perbarui state lokal dan jadikan board aktif
+      onUpdateBoards(updatedList);
+      setSelectedBoardId(savedBoard.id);
+      onSetActiveBoard(savedBoard.id);
+
+      try {
+        await settingsService.saveActiveBoardId(savedBoard.id);
+      } catch (err) {
+        console.warn('Gagal menyimpan status active board id:', err);
+      }
+
+      // 4. Tutup modal & bersihkan form
+      setIsNewBoardModalOpen(false);
+      setNewBoardName('');
+      setNewBoardDesc('');
+
+      // 5. Siarkan sinkronisasi realtime ke seluruh layar
+      await realtimeSyncService.publishSync('boards', 'create', { activeBoardId: savedBoard.id });
+    } catch (err: any) {
+      console.error('SIMKA CREATE BOARD ERROR:', err);
+      alert(`Gagal membuat board di database: ${err?.message || 'Terjadi kesalahan sistem'}`);
+    } finally {
+      setIsCreatingBoard(false);
+    }
   };
 
   const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
@@ -1814,10 +1864,17 @@ export const AdminBoardDisplay: React.FC<AdminBoardDisplayProps> = ({
               </button>
               <button
                 onClick={handleCreateBoard}
-                disabled={!newBoardName.trim()}
-                className="px-5 py-2 rounded-xl font-display font-black text-xs bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] disabled:opacity-40"
+                disabled={!newBoardName.trim() || isCreatingBoard}
+                className="px-5 py-2 rounded-xl font-display font-black text-xs bg-[#FFD166] hover:bg-[#F4C142] text-[#18181B] border-2 border-[#18181B] shadow-[2px_2px_0px_#18181B] disabled:opacity-40 flex items-center gap-1.5"
               >
-                BUAT BOARD
+                {isCreatingBoard ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>MENYIMPAN...</span>
+                  </>
+                ) : (
+                  <span>BUAT BOARD</span>
+                )}
               </button>
             </div>
           </div>

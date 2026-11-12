@@ -248,6 +248,7 @@ export default function App() {
 
     // Set up Realtime Subscriptions
     const mediaChannel = supabase.channel('media-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'boards' }, () => slideService.getBoards().then(setBoards))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => refreshMedia())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, () => refreshMedia())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slides' }, () => slideService.getBoards().then(setBoards))

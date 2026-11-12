@@ -1,6 +1,21 @@
 -- SCHEMA FOR SIMKA DIGITAL SIGNAGE EMKA
 -- Database: Supabase (PostgreSQL)
 
+-- 0. Tabel Boards (Daftar Board Playlist Signage)
+CREATE TABLE IF NOT EXISTS boards (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT FALSE,
+    loop_mode TEXT DEFAULT 'loop_forever',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE boards ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Access" ON boards;
+CREATE POLICY "Enable Access for All" ON boards FOR ALL USING (true) WITH CHECK (true);
+
 -- 1. Tabel Media (Foto & Poster)
 CREATE TABLE IF NOT EXISTS media (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -202,6 +217,7 @@ DO $$
 BEGIN
   BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE 
+      boards,
       jadwal_les, 
       slides, 
       slide_media, 

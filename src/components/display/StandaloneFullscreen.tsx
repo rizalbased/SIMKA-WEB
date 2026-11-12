@@ -205,6 +205,7 @@ export const StandaloneFullscreen: React.FC = () => {
     const channelName = 'simka-fullscreen-realtime';
     const channel = isSupabaseConfigured()
       ? supabase.channel(channelName)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'boards' }, () => reloadSlides())
           .on('postgres_changes', { event: '*', schema: 'public', table: 'slides' }, () => reloadSlides())
           .on('postgres_changes', { event: '*', schema: 'public', table: 'slide_media' }, () => reloadSlides())
           .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => reloadSlides())

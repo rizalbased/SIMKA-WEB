@@ -7,155 +7,342 @@ export const isUUID = (str: any): boolean => {
 };
 
 export const slideService = {
+  /**
+   * Mengambil seluruh board display beserta urutan slide-nya dari Supabase.
+   * Mendukung tabel `boards`, registri `display_settings`, serta pengelompokan dari `slides`.
+   */
   async getBoards(): Promise<BoardItem[]> {
     try {
-      // 1. Fetch all slides
+      const boardsMap: Record<string, BoardItem> = {};
+
+      // 1. Ambil data dari tabel `boards` (jika tabel sudah ada di Supabase)
+      try {
+        const { data: dbBoardsData, error: dbBoardsError } = await supabase
+          .from('boards')
+          .select('*')
+          .order('created_at', { ascending: true });
+
+        if (!dbBoardsError && dbBoardsData && dbBoardsData.length > 0) {
+          dbBoardsData.forEach((b: any) => {
+            boardsMap[b.id] = {
+              id: b.id,
+              name: b.name || `Board ${b.id}`,
+              description: b.description || '',
+              isActive: Boolean(b.is_active),
+              loopMode: b.loop_mode || 'loop_forever',
+              createdAt: b.created_at ? b.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+              slides: []
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('[slideService] Query tabel boards dilewati:', err);
+      }
+
+      // 2. Ambil data dari registri `display_settings` (id: 'boards_registry') sebagai penyimpanan redundan yang pasti ada
+      try {
+        const { data: regData } = await supabase
+          .from('display_settings')
+          .select('*')
+          .eq('id', 'boards_registry')
+          .single();
+
+        if (regData?.config?.boards && Array.isArray(regData.config.boards)) {
+          regData.config.boards.forEach((b: any) => {
+            if (!boardsMap[b.id]) {
+              boardsMap[b.id] = {
+                id: b.id,
+                name: b.name,
+                description: b.description || '',
+                isActive: Boolean(b.isActive),
+                loopMode: b.loopMode || 'loop_forever',
+                createdAt: b.createdAt || new Date().toISOString().split('T')[0],
+                slides: []
+              };
+            } else {
+              // Pertahankan nama dan deskripsi jika tabel kosong
+              if (b.name) boardsMap[b.id].name = b.name;
+              if (b.description) boardsMap[b.id].description = b.description;
+            }
+          });
+        }
+      } catch {
+        // Abaikan jika belum ada
+      }
+
+      // 3. Ambil seluruh slide dari tabel `slides` beserta relasi medianya
       const { data: slidesData, error: slidesError } = await supabase
         .from('slides')
         .select('*, slide_media(*, media(*))')
         .order('urutan', { ascending: true });
 
-      if (slidesError) {
-        if (slidesError.code === 'PGRST205') {
-          console.warn('Table "slides" does not exist yet.');
-          return [];
-        }
+      if (slidesError && slidesError.code !== 'PGRST205') {
         console.error('Error fetching slides:', slidesError);
-        return [];
       }
 
-      if (!slidesData || slidesData.length === 0) {
-        return [];
-      }
-
-      // 2. Group dynamically by board_id
-      const boardsMap: Record<string, BoardItem> = {};
-
-      slidesData.forEach(slide => {
-        const bId = slide.board_id || 'board-main';
-        if (!boardsMap[bId]) {
-          const boardNum = Object.keys(boardsMap).length + 1;
-          boardsMap[bId] = {
-            id: bId,
-            name: `Board ${boardNum}`,
-            description: `Board digital signage ${boardNum}`,
-            isActive: Object.keys(boardsMap).length === 0,
-            loopMode: 'loop_forever',
-            slides: []
-          };
-        }
-
-        // Construct slide object
-        const mediaItems = (slide.slide_media || [])
-          .sort((a: any, b: any) => a.posisi - b.posisi)
-          .map((sm: any) => {
-            if (!sm.media) return null;
-            return {
-              ...sm.media,
-              posisi: sm.posisi
+      if (slidesData && slidesData.length > 0) {
+        slidesData.forEach(slide => {
+          const bId = slide.board_id || 'board-main';
+          if (!boardsMap[bId]) {
+            const boardNum = Object.keys(boardsMap).length + 1;
+            boardsMap[bId] = {
+              id: bId,
+              name: `Board ${boardNum}`,
+              description: `Board digital signage ${boardNum}`,
+              isActive: Object.keys(boardsMap).length === 0,
+              loopMode: 'loop_forever',
+              createdAt: slide.created_at ? slide.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+              slides: []
             };
-          })
-          .filter((m: any) => m !== null);
-        
-        const content: any = { ...slide.config };
+          }
 
-        // Map media based on slide type and their exact slot positions
-        if (slide.tipe === '3_FOTO' || slide.tipe === 'GALERI') {
-          const photos = ['', '', ''];
-          mediaItems.forEach((m: any, index: number) => {
-            const pos = typeof m.posisi === 'number' ? m.posisi : index;
-            if (pos >= 0 && pos < 3) {
-              photos[pos] = getPublicUrl(m.file_path);
-            }
-          });
-          content.photos = photos;
-        } else if (slide.tipe === 'FOTO_GRID' || slide.tipe === 'GRID') {
-          const grid = ['', '', '', ''];
-          mediaItems.forEach((m: any, index: number) => {
-            const pos = typeof m.posisi === 'number' ? m.posisi : index;
-            if (pos >= 0 && pos < 4) {
-              grid[pos] = getPublicUrl(m.file_path);
-            }
-          });
-          content.gridPhotos = grid;
-        } else if (slide.tipe === '1_POSTER') {
-          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-          content.posterUrl = m ? getPublicUrl(m.file_path) : '';
-        } else if (slide.tipe === '3_POSTER') {
-          const posters = ['', '', ''];
-          mediaItems.forEach((m: any, index: number) => {
-            const pos = typeof m.posisi === 'number' ? m.posisi : index;
-            if (pos >= 0 && pos < 3) {
-              posters[pos] = getPublicUrl(m.file_path);
-            }
-          });
-          content.posters = posters;
-        } else if (slide.tipe === 'FOTO_INFORMASI' || slide.tipe === 'SPLIT') {
-          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-          content.splitPhotoUrl = m ? getPublicUrl(m.file_path) : '';
-        } else if (slide.tipe === 'VIDEO') {
-          const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
-          content.videoUrl = m ? getPublicUrl(m.file_path) : '';
-          content.videoTitle = m ? m.title : '';
-        }
+          // Konstruksi relasi media
+          const mediaItems = (slide.slide_media || [])
+            .sort((a: any, b: any) => a.posisi - b.posisi)
+            .map((sm: any) => {
+              if (!sm.media) return null;
+              return {
+                ...sm.media,
+                posisi: sm.posisi
+              };
+            })
+            .filter((m: any) => m !== null);
+          
+          const content: any = { ...slide.config };
 
-        boardsMap[bId].slides.push({
-          id: slide.id,
-          title: slide.judul,
-          type: slide.tipe as any,
-          durationSec: slide.durasi,
-          transition: slide.efek_transisi as any,
-          transitionDurationMs: slide.durasi_transisi,
-          enabled: slide.aktif,
-          content: content,
-          slideMedia: mediaItems
+          if (slide.tipe === '3_FOTO' || slide.tipe === 'GALERI') {
+            const photos = ['', '', ''];
+            mediaItems.forEach((m: any, index: number) => {
+              const pos = typeof m.posisi === 'number' ? m.posisi : index;
+              if (pos >= 0 && pos < 3) photos[pos] = getPublicUrl(m.file_path);
+            });
+            content.photos = photos;
+          } else if (slide.tipe === 'FOTO_GRID' || slide.tipe === 'GRID') {
+            const grid = ['', '', '', ''];
+            mediaItems.forEach((m: any, index: number) => {
+              const pos = typeof m.posisi === 'number' ? m.posisi : index;
+              if (pos >= 0 && pos < 4) grid[pos] = getPublicUrl(m.file_path);
+            });
+            content.gridPhotos = grid;
+          } else if (slide.tipe === '1_POSTER') {
+            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+            content.posterUrl = m ? getPublicUrl(m.file_path) : '';
+          } else if (slide.tipe === '3_POSTER') {
+            const posters = ['', '', ''];
+            mediaItems.forEach((m: any, index: number) => {
+              const pos = typeof m.posisi === 'number' ? m.posisi : index;
+              if (pos >= 0 && pos < 3) posters[pos] = getPublicUrl(m.file_path);
+            });
+            content.posters = posters;
+          } else if (slide.tipe === 'FOTO_INFORMASI' || slide.tipe === 'SPLIT') {
+            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+            content.splitPhotoUrl = m ? getPublicUrl(m.file_path) : '';
+          } else if (slide.tipe === 'VIDEO') {
+            const m = mediaItems.find((m: any) => m.posisi === 0) || mediaItems[0];
+            content.videoUrl = m ? getPublicUrl(m.file_path) : '';
+            content.videoTitle = m ? m.title : '';
+          }
+
+          boardsMap[bId].slides.push({
+            id: slide.id,
+            title: slide.judul,
+            type: slide.tipe as any,
+            durationSec: slide.durasi,
+            transition: slide.efek_transisi as any,
+            transitionDurationMs: slide.durasi_transisi,
+            enabled: slide.aktif,
+            content: content,
+            slideMedia: mediaItems
+          });
         });
-      });
+      }
+
+      // 4. Sinkronisasi status board aktif dari display_settings (active_board)
+      try {
+        const { data: activeSetting } = await supabase
+          .from('display_settings')
+          .select('*')
+          .eq('id', 'active_board')
+          .single();
+
+        const activeId = activeSetting?.config?.activeBoardId;
+        if (activeId && boardsMap[activeId]) {
+          Object.keys(boardsMap).forEach(id => {
+            boardsMap[id].isActive = id === activeId;
+          });
+        }
+      } catch {
+        // abaikan
+      }
 
       return Object.values(boardsMap);
     } catch (err) {
-      console.warn('Network error fetching slides:', err);
+      console.warn('[slideService] Error fetching boards:', err);
       return [];
     }
   },
 
-  async deleteBoard(boardId: string) {
+  /**
+   * Menyimpan board baru secara permanen ke Supabase
+   */
+  async createBoard(board: BoardItem): Promise<BoardItem> {
+    const boardPayload = {
+      id: board.id,
+      name: board.name.trim(),
+      description: board.description?.trim() || '',
+      is_active: board.isActive ?? false,
+      loop_mode: board.loopMode || 'loop_forever',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // 1. Coba INSERT langsung ke tabel `boards`
     try {
-      // 1. Primary: Call Supabase RPC delete_board
-      let { data, error } = await supabase.rpc('delete_board', {
-        p_board_id: boardId
+      const { error } = await supabase.from('boards').upsert(boardPayload);
+      if (error) {
+        console.warn('[slideService] Gagal upsert tabel boards (mungkin tabel belum dibuat):', error.message);
+      } else {
+        console.log('[slideService] Board berhasil disimpan di tabel "boards":', board.id);
+      }
+    } catch (err) {
+      console.warn('[slideService] Exception upsert tabel boards:', err);
+    }
+
+    // 2. Simpan juga ke `display_settings` ('boards_registry') sebagai persistensi bergaransi
+    try {
+      const { data: regData } = await supabase
+        .from('display_settings')
+        .select('*')
+        .eq('id', 'boards_registry')
+        .single();
+
+      const existingBoards: any[] = Array.isArray(regData?.config?.boards) 
+        ? regData.config.boards 
+        : [];
+
+      const updatedBoards = existingBoards.filter((b: any) => b.id !== board.id);
+      updatedBoards.push({
+        id: board.id,
+        name: board.name,
+        description: board.description || '',
+        isActive: board.isActive,
+        loopMode: board.loopMode || 'loop_forever',
+        createdAt: board.createdAt || new Date().toISOString().split('T')[0]
       });
 
-      if (error && (error.message?.includes('p_board_id') || error.code === '42883')) {
-        // Retry with board_id parameter if function signature differs
-        const res2 = await supabase.rpc('delete_board', {
-          board_id: boardId
-        } as any);
-        data = res2.data;
-        error = res2.error;
-      }
+      await supabase.from('display_settings').upsert({
+        id: 'boards_registry',
+        config: { boards: updatedBoards }
+      });
+      console.log('[slideService] Board berhasil dicadangkan ke display_settings (boards_registry)');
+    } catch (regErr) {
+      console.warn('[slideService] Gagal update display_settings boards_registry:', regErr);
+    }
 
-      if (error) {
-        console.warn('RPC delete_board returned error, falling back to direct delete:', error);
-        // Fallback: Delete slide_media relations and slides only (never media records or storage files)
-        const { data: slides, error: fetchError } = await supabase
+    // 3. Jika board diatur aktif, perbarui setting active_board
+    if (board.isActive) {
+      try {
+        await supabase.from('display_settings').upsert({
+          id: 'active_board',
+          config: { activeBoardId: board.id }
+        });
+      } catch (err) {
+        console.warn('[slideService] Gagal update active_board:', err);
+      }
+    }
+
+    return board;
+  },
+
+  /**
+   * Memperbarui informasi board di Supabase
+   */
+  async updateBoard(board: BoardItem): Promise<void> {
+    // 1. Update di tabel `boards`
+    try {
+      await supabase.from('boards').update({
+        name: board.name,
+        description: board.description,
+        is_active: board.isActive,
+        loop_mode: board.loopMode,
+        updated_at: new Date().toISOString()
+      }).eq('id', board.id);
+    } catch {}
+
+    // 2. Update di `display_settings`
+    try {
+      const { data: regData } = await supabase
+        .from('display_settings')
+        .select('*')
+        .eq('id', 'boards_registry')
+        .single();
+
+      const existingBoards: any[] = Array.isArray(regData?.config?.boards) ? regData.config.boards : [];
+      const updatedBoards = existingBoards.map((b: any) => b.id === board.id ? {
+        ...b,
+        name: board.name,
+        description: board.description,
+        isActive: board.isActive,
+        loopMode: board.loopMode
+      } : b);
+
+      await supabase.from('display_settings').upsert({
+        id: 'boards_registry',
+        config: { boards: updatedBoards }
+      });
+    } catch {}
+  },
+
+  /**
+   * Menghapus board beserta seluruh slide dan relasi medianya dari Supabase
+   */
+  async deleteBoard(boardId: string) {
+    try {
+      // 1. Hapus seluruh relasi slide_media dan slide di tabel `slides`
+      try {
+        const { data: slides } = await supabase
           .from('slides')
           .select('id')
           .eq('board_id', boardId);
-
-        if (fetchError) throw fetchError;
 
         if (slides && slides.length > 0) {
           const slideIds = slides.map(s => s.id).filter(isUUID);
           if (slideIds.length > 0) {
             await supabase.from('slide_media').delete().in('slide_id', slideIds);
           }
-          const { error: deleteErr } = await supabase.from('slides').delete().eq('board_id', boardId);
-          if (deleteErr) throw deleteErr;
+          await supabase.from('slides').delete().eq('board_id', boardId);
         }
+      } catch (slideErr) {
+        console.warn('[slideService] Gagal menghapus slides untuk board:', slideErr);
       }
 
-      return data;
+      // 2. Hapus baris dari tabel `boards`
+      try {
+        await supabase.from('boards').delete().eq('id', boardId);
+      } catch (bErr) {
+        console.warn('[slideService] Gagal menghapus baris tabel boards:', bErr);
+      }
+
+      // 3. Hapus dari registri `display_settings`
+      try {
+        const { data: regData } = await supabase
+          .from('display_settings')
+          .select('*')
+          .eq('id', 'boards_registry')
+          .single();
+
+        if (regData?.config?.boards && Array.isArray(regData.config.boards)) {
+          const filtered = regData.config.boards.filter((b: any) => b.id !== boardId);
+          await supabase.from('display_settings').upsert({
+            id: 'boards_registry',
+            config: { boards: filtered }
+          });
+        }
+      } catch (regErr) {
+        console.warn('[slideService] Gagal menghapus board dari registri display_settings:', regErr);
+      }
+
+      return { success: true };
     } catch (err: any) {
       console.error('Error in deleteBoard:', err);
       throw err;
